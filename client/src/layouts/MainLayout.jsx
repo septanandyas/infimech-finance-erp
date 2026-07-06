@@ -8,7 +8,6 @@ const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: TrendingUp, label: 'Cashflow', path: '/cashflow' },
     { icon: FileText, label: 'Invoice', path: '/invoice' },
-    { icon: Wallet, label: 'Laporan Saldo', path: '/saldo' },
     { icon: BookOpen, label: 'Neraca', path: '/neraca' },
 ];
 

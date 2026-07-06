@@ -49,9 +49,11 @@ const formatTgl = (val) => {
 };
 
 export default function InvoicePDF({ invoice }) {
-    const subtotal = invoice.amount || 0;
-    const tax = invoice.tax || 0;
-    const total = invoice.total || 0;
+    const subtotal = Number(invoice.amount) || 0;
+    const tax = Number(invoice.tax) || 0;
+    // Total = Subtotal + Pajak (harga final yang harus dibayar client)
+    const total = subtotal + tax;
+    const hasTax = invoice.tax_rate > 0 && invoice.tax_label;
 
     return (
         <Document>
@@ -109,28 +111,23 @@ export default function InvoicePDF({ invoice }) {
 
                 {/* Totals */}
                 <View style={styles.totalsBox}>
-                    <View style={styles.totalRow}>
-                        <Text style={styles.totalLabel}>Subtotal</Text>
-                        <Text style={styles.totalValue}>{formatRp(subtotal)}</Text>
-                    </View>
-                    {tax > 0 && (
-                        <View style={styles.totalRow}>
-                            <Text style={styles.totalLabel}>{invoice.tax_label || 'Pajak'} ({invoice.tax_rate || 0}%)</Text>
-                            <Text style={styles.totalValue}>{formatRp(tax)}</Text>
-                        </View>
-                    )}
                     <View style={styles.totalDivider} />
                     <View style={styles.grandTotalRow}>
                         <Text style={styles.grandTotalLabel}>TOTAL</Text>
                         <Text style={styles.grandTotalValue}>{formatRp(total)}</Text>
                     </View>
+                    {hasTax && (
+                        <Text style={{ fontSize: 8, color: '#94a3b8', marginTop: 5, fontStyle: 'italic' }}>
+                            *Harga sudah termasuk {invoice.tax_label} {invoice.tax_rate}%
+                        </Text>
+                    )}
                 </View>
 
-                {/* Notes & Payment Terms */}
                 {/* Tanda Tangan */}
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 24 }}>
                     <View style={{ alignItems: 'center', width: 160 }}>
-                        <Text style={{ fontSize: 8, color: '#64748b', marginBottom: 50 }}>Jakarta, {new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</Text>
+                        <Text style={{ fontSize: 8, color: '#64748b', marginBottom: 5 }}>Jakarta, {new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</Text>
+                        <Image src="/ttd_pak_aji.png" style={{ width: 100, height: 50, marginBottom: 5 }} />
                         <View style={{ borderBottomWidth: 1, borderBottomColor: '#334155', width: 140, marginBottom: 4 }} />
                         <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1e293b' }}>AJI CANDRA LESTARI</Text>
                         <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1e293b' }}>Direktur Utama</Text>

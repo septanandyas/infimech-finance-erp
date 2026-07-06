@@ -68,6 +68,7 @@ export default function Invoice() {
 
     const subtotal = form.items.reduce((sum, item) => sum + item.total, 0);
     const taxAmount = subtotal * (form.tax_rate / 100);
+    // Total = Subtotal + Pajak (harga final yang harus dibayar client)
     const total = subtotal + taxAmount;
 
     const resetForm = () => {
@@ -300,17 +301,16 @@ export default function Invoice() {
 
                         {/* Total */}
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1 text-sm">
-                            <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{formatRupiah(subtotal)}</span></div>
-                            {form.tax_rate > 0 && (
-                                <div className="flex justify-between text-slate-500">
-                                    <span>{form.tax_label} {form.tax_rate}%</span>
-                                    <span>{formatRupiah(taxAmount)}</span>
-                                </div>
-                            )}
-                            <div className="flex justify-between text-slate-800 font-bold text-base border-t border-slate-200 pt-1 mt-1">
+                            <div className="flex justify-between text-slate-800 font-bold text-base">
                                 <span>Total</span>
                                 <span className="text-sky-600">{formatRupiah(total)}</span>
                             </div>
+                            {form.tax_rate > 0 && (
+                                <p className="text-xs text-slate-400 italic pt-1">
+                                    *Harga sudah termasuk {form.tax_label} {form.tax_rate}%
+                                    {taxAmount > 0 && ` (Rp ${taxAmount.toLocaleString('id-ID')})`}
+                                </p>
+                            )}
                         </div>
 
                         <div className="flex justify-end gap-2">

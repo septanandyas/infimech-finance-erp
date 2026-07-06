@@ -8,7 +8,6 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Cashflow from './pages/Cashflow';
 import Invoice from './pages/Invoice';
-import Saldo from './pages/Saldo';
 import Neraca from './pages/Neraca';
 
 const ProtectedRoute = ({ children }) => {
@@ -31,7 +30,6 @@ function AppRoutes() {
                 <Route index element={<Dashboard />} />
                 <Route path="cashflow" element={<Cashflow />} />
                 <Route path="invoice" element={<Invoice />} />
-                <Route path="saldo" element={<Saldo />} />
                 <Route path="neraca" element={<Neraca />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />

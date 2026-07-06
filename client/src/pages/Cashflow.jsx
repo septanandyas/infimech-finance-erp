@@ -1,3 +1,4 @@
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -7,6 +8,12 @@ import { cn } from '../lib/utils';
 
 const CATEGORIES_INCOME = ['Pembayaran Project', 'Down Payment', 'Pelunasan', 'Lain-lain'];
 const CATEGORIES_EXPENSE = ['Gaji', 'Operasional', 'Software', 'Hardware', 'Marketing', 'Lain-lain'];
+
+const formatThousand = (val) => {
+    if (!val && val !== 0) return '';
+    const num = val.toString().replace(/\D/g, '');
+    return num.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+};
 
 export default function Cashflow() {
     const now = new Date();
@@ -18,6 +25,7 @@ export default function Cashflow() {
     const [prospects, setProspects] = useState([]);
     const [form, setForm] = useState({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' });
     const [editingRow, setEditingRow] = useState(null);
+    const [saldoData, setSaldoData] = useState([]);
 
     const fetchData = async () => {
         try {
@@ -38,10 +46,24 @@ export default function Cashflow() {
         axios.get('/api/invoice/prospects').then(r => setProspects(r.data)).catch(() => { });
     }, []);
 
+    useEffect(() => {
+        const fetchAll = async () => {
+            await fetchData();
+            try {
+                const saldoRes = await axios.get(`/api/saldo?year=${year}`);
+                setSaldoData(saldoRes.data.map(s => ({ ...s, name: MONTHS[s.month - 1] })));
+            } catch (error) { console.error(error); }
+        };
+        fetchAll();
+    }, [month, year]);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await axios.post('/api/cashflow', form);
+            await axios.post('/api/cashflow', {
+                ...form,
+                amount: Number(form.amount) || 0
+            });
             toast.success('Cashflow ditambahkan!');
             setShowForm(false);
             setForm({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' });
@@ -78,7 +100,10 @@ export default function Cashflow() {
     const handleUpdate = async (e) => {
         e.preventDefault();
         try {
-            await axios.put(`/api/cashflow/${editingRow}`, form);
+            await axios.put(`/api/cashflow/${editingRow}`, {
+                ...form,
+                amount: Number(form.amount) || 0
+            });
             toast.success('Cashflow diperbarui!');
             setShowForm(false);
             setEditingRow(null);
@@ -155,7 +180,19 @@ export default function Cashflow() {
                         </div>
                         <div>
                             <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Jumlah (Rp)</label>
-                            <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required placeholder="0" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
+                            <input
+                                type="number"
+                                value={form.amount}
+                                onChange={e => setForm({ ...form, amount: e.target.value })}
+                                required
+                                placeholder="0"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                            />
+                            {form.amount && (
+                                <span className="text-xs text-slate-400 mt-1 block">
+                                    {formatRupiah(Number(form.amount) || 0)}
+                                </span>
+                            )}
                         </div>
                         <div>
                             <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tanggal</label>
@@ -225,6 +262,63 @@ export default function Cashflow() {
                         ))}
                     </tbody>
                 </table>
+            </div>
+
+            {/* ===== LAPORAN SALDO ===== */}
+            <div className="mt-10 space-y-6">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Laporan Saldo</h2>
+                    <p className="text-slate-500 mt-1">Posisi keuangan kumulatif {year}</p>
+                </div>
+
+                <div className="bg-sky-50 border border-sky-200 rounded-2xl p-6">
+                    <p className="text-xs text-sky-600 font-bold uppercase tracking-wider mb-1">Saldo Kumulatif {year}</p>
+                    <p className="text-4xl font-bold text-sky-600">{formatRupiah(saldoData.length > 0 ? saldoData[saldoData.length - 1]?.balance || 0 : 0)}</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                    <h2 className="font-bold text-slate-800 mb-6">Grafik Saldo Kumulatif</h2>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={saldoData}>
+                            <defs>
+                                <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.2} />
+                                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} />
+                            <YAxis tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={v => `${(v / 1000000).toFixed(0)}jt`} />
+                            <Tooltip formatter={v => formatRupiah(v)} contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 12 }} />
+                            <Area type="monotone" dataKey="balance" name="Saldo" stroke="#0ea5e9" fill="url(#colorBalance)" strokeWidth={2} />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Bulan</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pemasukan</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pengeluaran</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Net</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Saldo Kumulatif</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {saldoData.map((row, i) => (
+                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-6 py-4 text-sm text-slate-700 font-medium">{row.name} {year}</td>
+                                    <td className="px-6 py-4 text-sm text-emerald-600 text-right">{formatRupiah(row.income)}</td>
+                                    <td className="px-6 py-4 text-sm text-red-600 text-right">{formatRupiah(row.expense)}</td>
+                                    <td className={`px-6 py-4 text-sm font-bold text-right ${row.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatRupiah(row.net)}</td>
+                                    <td className="px-6 py-4 text-sm text-sky-600 font-bold text-right">{formatRupiah(row.balance)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );

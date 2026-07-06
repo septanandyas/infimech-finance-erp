@@ -5,48 +5,57 @@ const getNeraca = async (req, res) => {
         const { year } = req.query;
         const targetYear = year || new Date().getFullYear();
 
-        // Total pemasukan (aset)
+        // Kas: total pemasukan cashflow
         const [income] = await db.query(
             "SELECT SUM(amount) as total FROM Cashflow WHERE type='income' AND YEAR(date) = ?",
             [targetYear]
         );
 
-        // Total pengeluaran (kewajiban)
+        // Pengeluaran operasional
         const [expense] = await db.query(
             "SELECT SUM(amount) as total FROM Cashflow WHERE type='expense' AND YEAR(date) = ?",
             [targetYear]
         );
 
-        // Invoice paid (piutang terlunasi)
-        const [paidInvoice] = await db.query(
-            "SELECT SUM(total) as total FROM Invoice WHERE status='paid' AND YEAR(paid_date) = ?",
-            [targetYear]
-        );
-
-        // Invoice outstanding (piutang belum lunas)
-        const [outstandingInvoice] = await db.query(
+        // Piutang: invoice outstanding (belum dibayar)
+        const [outstanding] = await db.query(
             "SELECT SUM(total) as total FROM Invoice WHERE status IN ('sent','overdue')",
             []
         );
 
-        const totalIncome = income[0].total || 0;
-        const totalExpense = expense[0].total || 0;
-        const modal = totalIncome - totalExpense;
+        const totalIncome = Number(income[0].total) || 0;
+        const totalExpense = Number(expense[0].total) || 0;
+        const totalPiutang = Number(outstanding[0].total) || 0;
+
+        // Kas bersih = pemasukan - pengeluaran
+        const kas = totalIncome - totalExpense;
+
+        // Total Aset = Kas + Piutang
+        const totalAset = kas + totalPiutang;
+
+        // Kewajiban = 0 (belum ada modul hutang)
+        const totalKewajiban = 0;
+
+        // Modal = Total Aset - Kewajiban
+        const totalModal = totalAset - totalKewajiban;
+
+        // Laba bersih = pemasukan - pengeluaran
+        const laba = totalIncome - totalExpense;
 
         res.json({
             aset: {
-                kas: totalIncome - totalExpense,
-                piutang: outstandingInvoice[0].total || 0,
-                total: (totalIncome - totalExpense) + (outstandingInvoice[0].total || 0)
+                kas,
+                piutang: totalPiutang,
+                total: totalAset
             },
             kewajiban: {
-                total: totalExpense
+                hutang: 0,
+                total: totalKewajiban
             },
             modal: {
-                laba: modal,
-                total: modal
-            },
-            invoicePaid: paidInvoice[0].total || 0
+                laba,
+                total: totalModal
+            }
         });
     } catch (error) {
         res.status(500).json({ message: error.message });

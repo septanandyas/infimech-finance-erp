@@ -53,8 +53,8 @@ const createInvoice = async (req, res) => {
         await conn.beginTransaction();
         const invoice_number = await getNextInvoiceNumber(conn, doc_type || 'INV', rev_number || '1', rev_version || 'A');
         const [result] = await conn.query(
-            'INSERT INTO Invoice (invoice_number, projectId, client_name, amount, tax, total, due_date, notes, createdBy, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,NOW(),NOW())',
-            [invoice_number, projectId || null, client_name, amount, tax || 0, total, due_date, notes, req.userId]
+            'INSERT INTO Invoice (invoice_number, projectId, client_name, amount, tax, tax_label, tax_rate, total, due_date, notes, createdBy, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())',
+            [invoice_number, projectId || null, client_name, amount, tax || 0, tax_label || 'PPN', tax_rate || 0, total, due_date, notes, req.userId]
         );
         if (items && items.length > 0) {
             const itemValues = items.map(item => [result.insertId, item.description, item.quantity, item.unit_price, item.total]);
