@@ -5,10 +5,12 @@ const getCashflow = async (req, res) => {
         const { month, year, type } = req.query;
         let sql = `
             SELECT c.*, u.username as createdByName,
-                   p.name_project as projectName
+                   p.name_project as projectName,
+                   coa.name as coa_name
             FROM Cashflow c
             JOIN User u ON c.createdBy = u.id
             LEFT JOIN Prospect p ON c.projectId = p.no_project
+            LEFT JOIN ChartOfAccount coa ON c.coa_code = coa.code
             WHERE 1=1
         `;
         const params = [];
@@ -30,10 +32,10 @@ const getCashflow = async (req, res) => {
 
 const createCashflow = async (req, res) => {
     try {
-        const { type, category, amount, description, date, projectId } = req.body;
+        const { type, category, amount, description, date, projectId, coa_code } = req.body;
         const [result] = await db.query(
-            'INSERT INTO Cashflow (type, category, amount, description, date, projectId, createdBy, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-            [type, category, amount, description, date, projectId || null, req.userId]
+            'INSERT INTO Cashflow (type, category, amount, description, date, projectId, createdBy, coa_code, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+            [type, category, amount, description, date, projectId || null, req.userId, coa_code || null]
         );
         const [newRow] = await db.query('SELECT * FROM Cashflow WHERE id = ?', [result.insertId]);
         res.json(newRow[0]);
@@ -45,10 +47,10 @@ const createCashflow = async (req, res) => {
 const updateCashflow = async (req, res) => {
     try {
         const { id } = req.params;
-        const { type, category, amount, description, date, projectId } = req.body;
+        const { type, category, amount, description, date, projectId, coa_code } = req.body;
         await db.query(
-            'UPDATE Cashflow SET type=?, category=?, amount=?, description=?, date=?, projectId=?, updatedAt=NOW() WHERE id=?',
-            [type, category, amount, description, date, projectId || null, id]
+            'UPDATE Cashflow SET type=?, category=?, amount=?, description=?, date=?, projectId=?, coa_code=?, updatedAt=NOW() WHERE id=?',
+            [type, category, amount, description, date, projectId || null, coa_code || null, id]
         );
         res.json({ message: 'Updated' });
     } catch (error) {

@@ -3,11 +3,16 @@ export function cn(...classes) {
 }
 
 export function formatRupiah(amount) {
+    const value = Number(amount);
+    if (!Number.isFinite(value)) {
+        return 'Rp 0';
+    }
+
     return new Intl.NumberFormat('id-ID', {
         style: 'currency',
         currency: 'IDR',
         minimumFractionDigits: 0
-    }).format(amount)
+    }).format(value)
 }
 
 export function formatDate(date) {

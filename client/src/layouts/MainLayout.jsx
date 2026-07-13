@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, TrendingUp, FileText, Wallet, BookOpen, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, FileText, Wallet, BookOpen, LogOut, Menu, X, Package, Building2, AlertCircle, ReceiptText } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: TrendingUp, label: 'Cashflow', path: '/cashflow' },
     { icon: FileText, label: 'Invoice', path: '/invoice' },
+    { icon: Package, label: 'Persediaan', path: '/inventory' },
     { icon: BookOpen, label: 'Neraca', path: '/neraca' },
+    { icon: Building2, label: 'Aset Tetap', path: '/aset-tetap' },
+    { icon: AlertCircle, label: 'Kewajiban', path: '/kewajiban' },
+    { icon: ReceiptText, label: 'Unearned Revenue', path: '/unearned-revenue' },
+    { icon: BookOpen, label: 'Buku Besar', path: '/buku-besar' },
+    { icon: BookOpen, label: 'Chart of Accounts', path: '/coa' },
 ];
 
 export default function MainLayout() {

@@ -9,7 +9,7 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+        axios.defaults.baseURL = import.meta.env.VITE_API_URL;
         if (token) {
             axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             const savedUser = localStorage.getItem('finance_user');

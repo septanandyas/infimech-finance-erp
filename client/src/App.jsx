@@ -9,6 +9,13 @@ import Dashboard from './pages/Dashboard';
 import Cashflow from './pages/Cashflow';
 import Invoice from './pages/Invoice';
 import Neraca from './pages/Neraca';
+import AsetTetap from './pages/AsetTetap';
+import Kewajiban from './pages/Kewajiban';
+
+import UnearnedRevenue from './pages/UnearnedRevenue';
+import BukuBesar from './pages/BukuBesar';
+import CoA from './pages/CoA';
+import Inventory from './pages/Inventory';
 
 const ProtectedRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -31,6 +38,12 @@ function AppRoutes() {
                 <Route path="cashflow" element={<Cashflow />} />
                 <Route path="invoice" element={<Invoice />} />
                 <Route path="neraca" element={<Neraca />} />
+                <Route path="aset-tetap" element={<AsetTetap />} />
+                <Route path="kewajiban" element={<Kewajiban />} />
+                <Route path="unearned-revenue" element={<UnearnedRevenue />} />
+                <Route path="buku-besar" element={<BukuBesar />} />
+                <Route path="coa" element={<CoA />} />
+                <Route path="inventory" element={<Inventory />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
         </Routes>

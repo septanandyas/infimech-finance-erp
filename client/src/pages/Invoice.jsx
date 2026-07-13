@@ -182,14 +182,30 @@ export default function Invoice() {
 
             {/* Filter */}
             <div className="flex gap-2 flex-wrap">
-                {['', 'draft', 'sent', 'paid', 'overdue'].map(s => (
-                    <button key={s} onClick={() => setFilterStatus(s)}
-                        className={cn("px-4 py-1.5 rounded-lg text-sm font-medium transition-colors border",
-                            filterStatus === s ? "bg-sky-500 text-white border-sky-500" : "text-slate-500 border-slate-200 hover:border-sky-400"
-                        )}>
-                        {s === '' ? 'Semua' : STATUS_CONFIG[s].label}
-                    </button>
-                ))}
+                {['', 'draft', 'sent', 'paid', 'overdue'].map(s => {
+                    const activeColors = {
+                        '': 'bg-slate-500 text-white border-slate-500',
+                        'draft': 'bg-slate-400 text-white border-slate-400',
+                        'sent': 'bg-blue-500 text-white border-blue-500',
+                        'paid': 'bg-emerald-500 text-white border-emerald-500',
+                        'overdue': 'bg-red-500 text-white border-red-500',
+                    };
+                    const inactiveColors = {
+                        '': 'text-slate-500 border-slate-200 hover:border-slate-400',
+                        'draft': 'text-slate-400 border-slate-200 hover:border-slate-400',
+                        'sent': 'text-blue-500 border-blue-200 hover:border-blue-400',
+                        'paid': 'text-emerald-500 border-emerald-200 hover:border-emerald-400',
+                        'overdue': 'text-red-500 border-red-200 hover:border-red-400',
+                    };
+                    return (
+                        <button key={s} onClick={() => setFilterStatus(s)}
+                            className={cn("px-4 py-1.5 rounded-lg text-sm font-medium transition-colors border",
+                                filterStatus === s ? activeColors[s] : inactiveColors[s]
+                            )}>
+                            {s === '' ? 'Semua' : STATUS_CONFIG[s].label}
+                        </button>
+                    );
+                })}
             </div>
 
             {/* Form */}

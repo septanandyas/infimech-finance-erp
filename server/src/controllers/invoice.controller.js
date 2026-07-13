@@ -114,16 +114,46 @@ const updateInvoice = async (req, res) => {
 };
 
 const updateInvoiceStatus = async (req, res) => {
+    const conn = await db.getConnection();
     try {
-        const { id } = req.params;
         const { status, paid_date } = req.body;
-        await db.query(
+        const invoiceId = req.params.id;
+        await conn.beginTransaction();
+
+        await conn.query(
             'UPDATE Invoice SET status=?, paid_date=?, updatedAt=NOW() WHERE id=?',
-            [status, paid_date || null, id]
+            [status, paid_date || null, invoiceId]
         );
+
+        if (status === 'paid') {
+            // Ambil semua UnearnedRevenue pending untuk invoice ini
+            const [pending] = await conn.query(
+                `SELECT * FROM UnearnedRevenue WHERE invoiceId = ? AND status = 'pending'`,
+                [invoiceId]
+            );
+
+            for (const entry of pending) {
+                // Pindahkan ke Cashflow sebagai income
+                await conn.query(
+                    `INSERT INTO Cashflow (type, category, amount, description, date, projectId, createdBy, createdAt, updatedAt)
+                     VALUES ('income', ?, ?, ?, NOW(), ?, ?, NOW(), NOW())`,
+                    [entry.category, entry.amount, `Auto-recognized dari invoice #${invoiceId}`, entry.projectId, entry.createdBy]
+                );
+                // Update status UnearnedRevenue jadi recognized
+                await conn.query(
+                    `UPDATE UnearnedRevenue SET status='recognized', recognized_at=NOW(), updatedAt=NOW() WHERE id=?`,
+                    [entry.id]
+                );
+            }
+        }
+
+        await conn.commit();
         res.json({ message: 'Status updated' });
     } catch (error) {
+        await conn.rollback();
         res.status(500).json({ message: error.message });
+    } finally {
+        conn.release();
     }
 };
 

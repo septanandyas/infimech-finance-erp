@@ -23,9 +23,12 @@ export default function Cashflow() {
     const [year, setYear] = useState(now.getFullYear());
     const [showForm, setShowForm] = useState(false);
     const [prospects, setProspects] = useState([]);
-    const [form, setForm] = useState({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' });
+    const [form, setForm] = useState({ type: 'income', category: 'Lain-lain', coa_code: '', amount: '', description: '', date: '', projectId: '' });
     const [editingRow, setEditingRow] = useState(null);
     const [saldoData, setSaldoData] = useState([]);
+    const [coas, setCoas] = useState([]);
+    const [liabilities, setLiabilities] = useState([]);
+    const [invoicesOutstanding, setInvoicesOutstanding] = useState([]);
 
     const fetchData = async () => {
         try {
@@ -52,6 +55,14 @@ export default function Cashflow() {
             try {
                 const saldoRes = await axios.get(`/api/saldo?year=${year}`);
                 setSaldoData(saldoRes.data.map(s => ({ ...s, name: MONTHS[s.month - 1] })));
+                const coaRes = await axios.get('/api/coa');
+                setCoas(coaRes.data || []);
+                const [liabRes, invoiceRes] = await Promise.all([
+                    axios.get('/api/liability'),
+                    axios.get('/api/invoice?status=sent'),
+                ]);
+                setLiabilities(liabRes.data);
+                setInvoicesOutstanding(invoiceRes.data.filter(i => ['sent', 'overdue'].includes(i.status)));
             } catch (error) { console.error(error); }
         };
         fetchAll();
@@ -66,7 +77,7 @@ export default function Cashflow() {
             });
             toast.success('Cashflow ditambahkan!');
             setShowForm(false);
-            setForm({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' });
+            setForm({ type: 'income', category: 'Lain-lain', coa_code: '', amount: '', description: '', date: '', projectId: '' });
             fetchData();
         } catch {
             toast.error('Gagal menambahkan cashflow');
@@ -88,7 +99,8 @@ export default function Cashflow() {
         setEditingRow(row.id);
         setForm({
             type: row.type,
-            category: row.category,
+            category: row.category || 'Lain-lain',
+            coa_code: row.coa_code || '',
             amount: row.amount,
             description: row.description || '',
             date: row.date?.slice(0, 10),
@@ -107,7 +119,7 @@ export default function Cashflow() {
             toast.success('Cashflow diperbarui!');
             setShowForm(false);
             setEditingRow(null);
-            setForm({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' });
+            setForm({ type: 'income', category: 'Lain-lain', coa_code: '', amount: '', description: '', date: '', projectId: '' });
             fetchData();
         } catch {
             toast.error('Gagal memperbarui cashflow');
@@ -115,6 +127,9 @@ export default function Cashflow() {
     };
 
     const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+    const totalPiutang = invoicesOutstanding.reduce((sum, i) => sum + Number(i.total), 0);
+    const totalUtang = liabilities.filter(l => l.status === 'outstanding').reduce((sum, l) => sum + Number(l.amount), 0);
 
     return (
         <div className="space-y-6">
@@ -124,7 +139,7 @@ export default function Cashflow() {
                     <p className="text-slate-500 mt-1">Arus kas masuk dan keluar</p>
                 </div>
                 <button
-                    onClick={() => { setEditingRow(null); setForm({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' }); setShowForm(!showForm); }}
+                    onClick={() => { setEditingRow(null); setForm({ type: 'income', category: 'Lain-lain', coa_code: '', amount: '', description: '', date: '', projectId: '' }); setShowForm(!showForm); }}
                     className="flex items-center gap-2 bg-sky-500 hover:bg-sky-600 text-white px-4 py-2.5 rounded-xl font-medium text-sm transition-colors"
                 >
                     <Plus size={18} /> Tambah
@@ -141,8 +156,8 @@ export default function Cashflow() {
                 </select>
             </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Summary Cards — Pemasukan | Pengeluaran | Net Cashflow | Total Piutang | Total Utang */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
                     <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider mb-1">Pemasukan</p>
                     <p className="text-2xl font-bold text-emerald-600">{formatRupiah(summary.totalIncome || 0)}</p>
@@ -154,6 +169,16 @@ export default function Cashflow() {
                 <div className={cn("rounded-2xl p-4 border", summary.netCashflow >= 0 ? "bg-sky-50 border-sky-200" : "bg-amber-50 border-amber-200")}>
                     <p className={cn("text-xs font-bold uppercase tracking-wider mb-1", summary.netCashflow >= 0 ? "text-sky-600" : "text-amber-600")}>Net Cashflow</p>
                     <p className={cn("text-2xl font-bold", summary.netCashflow >= 0 ? "text-sky-600" : "text-amber-600")}>{formatRupiah(summary.netCashflow || 0)}</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                    <p className="text-xs text-amber-600 font-bold uppercase tracking-wider mb-1">Total Piutang</p>
+                    <p className="text-2xl font-bold text-amber-600">{formatRupiah(totalPiutang)}</p>
+                    <p className="text-xs text-amber-500 mt-1">{invoicesOutstanding.length} invoice belum lunas</p>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                    <p className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Total Utang</p>
+                    <p className="text-2xl font-bold text-red-600">{formatRupiah(totalUtang)}</p>
+                    <p className="text-xs text-red-500 mt-1">{liabilities.filter(l => l.status === 'outstanding').length} utang belum lunas</p>
                 </div>
             </div>
 
@@ -172,10 +197,12 @@ export default function Cashflow() {
                             </select>
                         </div>
                         <div>
-                            <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Kategori</label>
-                            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500">
-                                <option value="">Pilih kategori...</option>
-                                {(form.type === 'income' ? CATEGORIES_INCOME : CATEGORIES_EXPENSE).map(c => <option key={c} value={c}>{c}</option>)}
+                            <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Akun CoA</label>
+                            <select value={form.coa_code} onChange={e => setForm({ ...form, coa_code: e.target.value })} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500">
+                                <option value="">Pilih Akun...</option>
+                                {coas
+                                    .filter(c => form.type === 'income' ? c.group === 'Pendapatan' || c.group === 'Aset' : c.group === 'Beban' || c.group === 'Aset' || c.group === 'Kewajiban')
+                                    .map(c => <option key={c.code} value={c.code}>[{c.code}] {c.name}</option>)}
                             </select>
                         </div>
                         <div>
@@ -210,7 +237,7 @@ export default function Cashflow() {
                             <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Keterangan tambahan..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
                         </div>
                         <div className="md:col-span-2 flex justify-end gap-2">
-                            <button type="button" onClick={() => { setShowForm(false); setEditingRow(null); setForm({ type: 'income', category: '', amount: '', description: '', date: '', projectId: '' }); }} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 transition-colors">Batal</button>
+                            <button type="button" onClick={() => { setShowForm(false); setEditingRow(null); setForm({ type: 'income', category: 'Lain-lain', coa_code: '', amount: '', description: '', date: '', projectId: '' }); }} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 transition-colors">Batal</button>
                             <button type="submit" className="px-6 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-bold transition-colors">Simpan</button>
                         </div>
                     </form>
@@ -224,7 +251,7 @@ export default function Cashflow() {
                         <tr className="border-b border-slate-200 bg-slate-50">
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tanggal</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tipe</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Kategori</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Akun CoA</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Keterangan</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Jumlah</th>
                             <th className="px-6 py-4"></th>
@@ -243,7 +270,7 @@ export default function Cashflow() {
                                         {row.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{row.category}</td>
+                                <td className="px-6 py-4 text-sm text-slate-600">{row.coa_code ? `[${row.coa_code}] ${row.coa_name}` : row.category}</td>
                                 <td className="px-6 py-4 text-sm text-slate-500">{row.description || '-'}</td>
                                 <td className={cn("px-6 py-4 text-sm font-bold text-right", row.type === 'income' ? "text-emerald-600" : "text-red-600")}>
                                     {row.type === 'income' ? '+' : '-'}{formatRupiah(row.amount)}
@@ -262,6 +289,96 @@ export default function Cashflow() {
                         ))}
                     </tbody>
                 </table>
+            </div>
+
+            {/* ===== PIUTANG ===== */}
+            <div className="mt-10 space-y-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-800">Piutang</h2>
+                    <p className="text-slate-500 mt-1">Daftar invoice yang belum dilunasi</p>
+                </div>
+
+                {/* Piutang Table */}
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-amber-50">
+                        <h3 className="font-bold text-amber-700 text-sm uppercase tracking-wider">Invoice Belum Lunas</h3>
+                    </div>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">No. Invoice</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Client</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jatuh Tempo</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Status</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {invoicesOutstanding.length === 0 && (
+                                <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada piutang outstanding</td></tr>
+                            )}
+                            {invoicesOutstanding.map(inv => {
+                                const isOverdue = new Date(inv.due_date) < new Date();
+                                return (
+                                    <tr key={inv.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4 text-sm font-medium text-slate-700">{inv.invoice_number}</td>
+                                        <td className="px-6 py-4 text-sm text-slate-600">{inv.client_name}</td>
+                                        <td className={`px-6 py-4 text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-slate-600'}`}>
+                                            {formatDate(inv.due_date)} {isOverdue && '⚠️'}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                                {isOverdue ? 'Jatuh Tempo' : 'Terkirim'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm font-bold text-amber-600 text-right">{formatRupiah(inv.total)}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Utang Table */}
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-red-50">
+                        <h3 className="font-bold text-red-700 text-sm uppercase tracking-wider">Utang — Belum Lunas</h3>
+                    </div>
+                    <table className="w-full">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Vendor</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Kategori</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jatuh Tempo</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jenis</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Jumlah</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {liabilities.filter(l => l.status === 'outstanding').length === 0 && (
+                                <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada utang outstanding</td></tr>
+                            )}
+                            {liabilities.filter(l => l.status === 'outstanding').map(l => {
+                                const isOverdue = new Date(l.due_date) < new Date();
+                                return (
+                                    <tr key={l.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4 text-sm font-medium text-slate-700">{l.name}</td>
+                                        <td className="px-6 py-4 text-sm text-slate-600">{l.category}</td>
+                                        <td className={`px-6 py-4 text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-slate-600'}`}>
+                                            {formatDate(l.due_date)} {isOverdue && '⚠️'}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${l.term_type === 'short_term' ? 'bg-orange-100 text-orange-600' : 'bg-purple-100 text-purple-600'}`}>
+                                                {l.term_type === 'short_term' ? 'Jangka Pendek' : 'Jangka Panjang'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm font-bold text-red-600 text-right">{formatRupiah(l.amount)}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* ===== LAPORAN SALDO ===== */}
