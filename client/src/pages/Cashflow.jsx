@@ -57,12 +57,12 @@ export default function Cashflow() {
                 setSaldoData(saldoRes.data.map(s => ({ ...s, name: MONTHS[s.month - 1] })));
                 const coaRes = await axios.get('/api/coa');
                 setCoas(coaRes.data || []);
-                const [liabRes, invoiceRes] = await Promise.all([
+                const [liabRes, contractRes] = await Promise.all([
                     axios.get('/api/liability'),
-                    axios.get('/api/invoice?status=sent'),
+                    axios.get('/api/contract'),
                 ]);
                 setLiabilities(liabRes.data);
-                setInvoicesOutstanding(invoiceRes.data.filter(i => ['sent', 'overdue'].includes(i.status)));
+                setInvoicesOutstanding(contractRes.data.filter(c => c.status === 'active' && Number(c.outstanding) > 0));
             } catch (error) { console.error(error); }
         };
         fetchAll();
@@ -157,27 +157,27 @@ export default function Cashflow() {
             </div>
 
             {/* Summary Cards — Pemasukan | Pengeluaran | Net Cashflow | Total Piutang | Total Utang */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider mb-1">Pemasukan</p>
-                    <p className="text-2xl font-bold text-emerald-600">{formatRupiah(summary.totalIncome || 0)}</p>
+                    <p className="text-xl font-bold text-emerald-600 leading-tight break-words w-full">{formatRupiah(summary.totalIncome || 0)}</p>
                 </div>
-                <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Pengeluaran</p>
-                    <p className="text-2xl font-bold text-red-600">{formatRupiah(summary.totalExpense || 0)}</p>
+                    <p className="text-xl font-bold text-red-600 leading-tight break-words w-full">{formatRupiah(summary.totalExpense || 0)}</p>
                 </div>
-                <div className={cn("rounded-2xl p-4 border", summary.netCashflow >= 0 ? "bg-sky-50 border-sky-200" : "bg-amber-50 border-amber-200")}>
+                <div className={cn("rounded-2xl p-4 border overflow-hidden", summary.netCashflow >= 0 ? "bg-sky-50 border-sky-200" : "bg-amber-50 border-amber-200")}>
                     <p className={cn("text-xs font-bold uppercase tracking-wider mb-1", summary.netCashflow >= 0 ? "text-sky-600" : "text-amber-600")}>Net Cashflow</p>
-                    <p className={cn("text-2xl font-bold", summary.netCashflow >= 0 ? "text-sky-600" : "text-amber-600")}>{formatRupiah(summary.netCashflow || 0)}</p>
+                    <p className={cn("text-xl font-bold break-all", summary.netCashflow >= 0 ? "text-sky-600" : "text-amber-600")}>{formatRupiah(summary.netCashflow || 0)}</p>
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-amber-600 font-bold uppercase tracking-wider mb-1">Total Piutang</p>
-                    <p className="text-2xl font-bold text-amber-600">{formatRupiah(totalPiutang)}</p>
+                    <p className="text-xl font-bold text-amber-600 leading-tight break-words w-full">{formatRupiah(totalPiutang)}</p>
                     <p className="text-xs text-amber-500 mt-1">{invoicesOutstanding.length} invoice belum lunas</p>
                 </div>
-                <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Total Utang</p>
-                    <p className="text-2xl font-bold text-red-600">{formatRupiah(totalUtang)}</p>
+                    <p className="text-xl font-bold text-red-600 leading-tight break-words w-full">{formatRupiah(totalUtang)}</p>
                     <p className="text-xs text-red-500 mt-1">{liabilities.filter(l => l.status === 'outstanding').length} utang belum lunas</p>
                 </div>
             </div>
@@ -201,7 +201,15 @@ export default function Cashflow() {
                             <select value={form.coa_code} onChange={e => setForm({ ...form, coa_code: e.target.value })} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500">
                                 <option value="">Pilih Akun...</option>
                                 {coas
-                                    .filter(c => form.type === 'income' ? c.group === 'Pendapatan' || c.group === 'Aset' : c.group === 'Beban' || c.group === 'Aset' || c.group === 'Kewajiban')
+                                    .filter(c => {
+                                        if (form.type === 'income') {
+                                            return c.group === 'Pendapatan' || c.code === '1100';
+                                        } else {
+                                            return c.group === 'Beban' ||
+                                                c.group === 'Kewajiban' ||
+                                                ['1300', '1350', '1400', '1500'].includes(c.code);
+                                        }
+                                    })
                                     .map(c => <option key={c.code} value={c.code}>[{c.code}] {c.name}</option>)}
                             </select>
                         </div>
@@ -295,46 +303,39 @@ export default function Cashflow() {
             <div className="mt-10 space-y-4">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-800">Piutang</h2>
-                    <p className="text-slate-500 mt-1">Daftar invoice yang belum dilunasi</p>
+                    <p className="text-slate-500 mt-1">Daftar kontrak yang masih memiliki piutang</p>
                 </div>
 
                 {/* Piutang Table */}
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                     <div className="px-6 py-4 border-b border-slate-100 bg-amber-50">
-                        <h3 className="font-bold text-amber-700 text-sm uppercase tracking-wider">Invoice Belum Lunas</h3>
+                        <h3 className="font-bold text-amber-700 text-sm uppercase tracking-wider">Piutang Kontrak Aktif</h3>
                     </div>
                     <table className="w-full">
                         <thead>
                             <tr className="border-b border-slate-200 bg-slate-50">
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">No. Invoice</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Project</th>
                                 <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Client</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jatuh Tempo</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Status</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">No. Kontrak</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Nilai Kontrak</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Terbayar</th>
+                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Piutang</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {invoicesOutstanding.length === 0 && (
                                 <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada piutang outstanding</td></tr>
                             )}
-                            {invoicesOutstanding.map(inv => {
-                                const isOverdue = new Date(inv.due_date) < new Date();
-                                return (
-                                    <tr key={inv.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-6 py-4 text-sm font-medium text-slate-700">{inv.invoice_number}</td>
-                                        <td className="px-6 py-4 text-sm text-slate-600">{inv.client_name}</td>
-                                        <td className={`px-6 py-4 text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-slate-600'}`}>
-                                            {formatDate(inv.due_date)} {isOverdue && '⚠️'}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                                                {isOverdue ? 'Jatuh Tempo' : 'Terkirim'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm font-bold text-amber-600 text-right">{formatRupiah(inv.total)}</td>
-                                    </tr>
-                                );
-                            })}
+                            {invoicesOutstanding.map(c => (
+                                <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-6 py-4 text-sm font-medium text-slate-700">{c.projectName}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{c.client_name}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{c.contract_number || '-'}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600 text-right">{formatRupiah(c.contract_value)}</td>
+                                    <td className="px-6 py-4 text-sm text-emerald-600 font-medium text-right">{formatRupiah(c.total_paid || 0)}</td>
+                                    <td className="px-6 py-4 text-sm font-bold text-amber-600 text-right">{formatRupiah(c.outstanding || 0)}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>

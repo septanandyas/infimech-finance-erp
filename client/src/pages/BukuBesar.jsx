@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { formatRupiah } from '../lib/utils';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Download, FileSpreadsheet, Printer } from 'lucide-react';
 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -30,12 +34,79 @@ export default function BukuBesar() {
         }, { debit: 0, credit: 0 });
     }, [entries]);
 
+    const handleExportExcel = () => {
+        const rows = [
+            ['BUKU BESAR - PT INFIMECH'],
+            [`Periode: ${MONTHS[month - 1]} ${year}`],
+            [],
+            ['Tanggal', 'Akun', 'Keterangan', 'Ref', 'Debit', 'Kredit'],
+            ...entries.map(row => [row.date, row.account, row.description, row.reference, row.debit || 0, row.credit || 0]),
+            [],
+            ['', '', '', 'TOTAL', summary.debit, summary.credit],
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Buku Besar');
+        XLSX.writeFile(wb, `BukuBesar_${MONTHS[month - 1]}_${year}.xlsx`);
+    };
+
+    const handleExportPDF = () => {
+        const doc = new jsPDF({ orientation: 'landscape' });
+        doc.setFontSize(16);
+        doc.text('BUKU BESAR - PT INFIMECH', 14, 15);
+        doc.setFontSize(11);
+        doc.text(`Periode: ${MONTHS[month - 1]} ${year}`, 14, 23);
+
+        autoTable(doc, {
+            startY: 30,
+            head: [['Tanggal', 'Akun', 'Keterangan', 'Ref', 'Debit', 'Kredit']],
+            body: [
+                ...entries.map(row => [
+                    row.date, row.account, row.description, row.reference,
+                    formatRupiah(row.debit || 0), formatRupiah(row.credit || 0)
+                ]),
+                ['', '', '', 'TOTAL', formatRupiah(summary.debit), formatRupiah(summary.credit)],
+            ],
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [14, 165, 233] },
+            didParseCell: (data) => {
+                if (data.row.index === entries.length) {
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.fillColor = [241, 245, 249];
+                }
+            }
+        });
+
+        doc.save(`BukuBesar_${MONTHS[month - 1]}_${year}.pdf`);
+    };
+
+    const handlePrint = () => window.print();
+
     return (
         <div className="space-y-6">
             <div className="flex flex-wrap justify-between items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-800">Buku Besar</h1>
                     <p className="text-slate-500 mt-1">Lihat transaksi akuntansi yang terintegrasi dari kas, invoice, dan unearned revenue</p>
+                </div>
+            </div>
+
+            <div className="flex flex-wrap justify-between items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-slate-800">Buku Besar</h1>
+                    <p className="text-slate-500 mt-1">Lihat transaksi akuntansi yang terintegrasi</p>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={handleExportExcel} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors">
+                        <FileSpreadsheet size={15} /> Excel
+                    </button>
+                    <button onClick={handleExportPDF} className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors">
+                        <Download size={15} /> PDF
+                    </button>
+                    <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-500 hover:bg-slate-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors">
+                        <Printer size={15} /> Print
+                    </button>
                 </div>
             </div>
 

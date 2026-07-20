@@ -13,7 +13,17 @@ const getNeracaByPeriod = async (month, year) => {
     );
 
     const [piutang] = await db.query(
-        `SELECT SUM(total) as total FROM Invoice WHERE status IN ('sent','overdue')`
+        `SELECT COALESCE(SUM(contract_value), 0) as total 
+     FROM ProjectContract 
+     WHERE status = 'active'`
+    );
+    const [sudahDibayar] = await db.query(
+        `SELECT COALESCE(SUM(ip.amount), 0) as total 
+     FROM InvoicePayment ip
+     JOIN Invoice i ON ip.invoiceId = i.id
+     JOIN ProjectContract c ON i.contractId = c.id
+     WHERE i.status IN ('acc','partial','paid')
+     AND c.status = 'active'`
     );
     const [inventory] = await db.query(
         `SELECT COALESCE(SUM(total_value), 0) as total FROM Inventory`
@@ -61,11 +71,20 @@ const getNeracaByPeriod = async (month, year) => {
         [dateParam]
     );
     const [unearned] = await db.query(
-        `SELECT COALESCE(SUM(amount), 0) as total FROM UnearnedRevenue WHERE status='pending' AND DATE(received_date) <= DATE(?)`,
-        [dateParam]
+        `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow 
+     WHERE coa_code = '2200' AND type = 'income'
+     AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
+        [year, year, month]
     );
 
-    const totalUnearned = Number(unearned[0]?.total) || 0;
+    // Kurangi yang sudah diakui (dipindah ke 4100)
+    const [recognized] = await db.query(
+        `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow 
+     WHERE coa_code = '4100' AND type = 'income'
+     AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
+        [year, year, month]
+    );
+    const totalUnearned = Math.max((Number(unearned[0]?.total) || 0) - (Number(recognized[0]?.total) || 0), 0);
     const ALL_LIABILITY_CATEGORIES = ['Hutang Bank', 'Hutang Usaha', 'Hutang Pajak', 'Hutang Gaji', 'Lainnya'];
 
     const shortTermDetail = ALL_LIABILITY_CATEGORIES.map(category => ({
@@ -80,7 +99,7 @@ const getNeracaByPeriod = async (month, year) => {
     }));
 
     const kas = (Number(income[0].total) || 0) - (Number(expense[0].total) || 0);
-    const totalPiutang = Number(piutang[0].total) || 0;
+    const totalPiutang = Math.max((Number(piutang[0].total) || 0) - (Number(sudahDibayar[0].total) || 0), 0);
     const totalPersediaan = Number(inventory[0]?.total) || 0;
     const totalAsetLancar = kas + totalPiutang + totalPersediaan;
     const totalShort = shortTermDetail.reduce((s, r) => s + r.total, 0);

@@ -3,13 +3,13 @@ import axios from 'axios';
 
 const AuthContext = createContext(null);
 
+axios.defaults.baseURL = import.meta.env.VITE_API_URL;
+
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(localStorage.getItem('finance_token'));
     const [loading, setLoading] = useState(true);
-
     useEffect(() => {
-        axios.defaults.baseURL = import.meta.env.VITE_API_URL;
         if (token) {
             axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             const savedUser = localStorage.getItem('finance_user');

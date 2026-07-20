@@ -30,8 +30,13 @@ const getLedgerEntries = async (req, res) => {
         const { month, year } = req.query;
         const rows = [];
 
+        // Fetch COA untuk mapping
+        const [coaRows] = await db.query('SELECT code, name FROM ChartOfAccount');
+        const coaMap = {};
+        coaRows.forEach(c => { coaMap[c.code] = `[${c.code}] ${c.name}`; });
+
         const [cashflowRows] = await db.query(`
-            SELECT id, type, category, amount, description, date, projectId
+            SELECT id, type, category, amount, description, date, coa_code
             FROM Cashflow
             ORDER BY date ASC, id ASC
         `);
@@ -40,10 +45,15 @@ const getLedgerEntries = async (req, res) => {
             const entryDate = formatDate(item.date);
             if (!filterByMonthYear(entryDate, month, year)) return;
 
+            // Nama akun dari COA kalau ada, fallback ke category
+            const bebanAkun = item.coa_code && coaMap[item.coa_code]
+                ? coaMap[item.coa_code]
+                : item.category || 'Biaya';
+
             if (item.type === 'income') {
                 rows.push({
                     date: entryDate,
-                    account: 'Kas',
+                    account: coaMap['1100'] || 'Kas',
                     description: item.description || `Penerimaan ${item.category}`,
                     reference: `CF-${item.id}`,
                     debit: Number(item.amount || 0),
@@ -52,7 +62,9 @@ const getLedgerEntries = async (req, res) => {
                 });
                 rows.push({
                     date: entryDate,
-                    account: 'Pendapatan',
+                    account: item.coa_code && coaMap[item.coa_code]
+                        ? coaMap[item.coa_code]
+                        : item.category || 'Pendapatan',
                     description: item.description || `Penerimaan ${item.category}`,
                     reference: `CF-${item.id}`,
                     debit: 0,
@@ -62,7 +74,7 @@ const getLedgerEntries = async (req, res) => {
             } else {
                 rows.push({
                     date: entryDate,
-                    account: 'Kas',
+                    account: coaMap['1100'] || 'Kas',
                     description: item.description || `Pengeluaran ${item.category}`,
                     reference: `CF-${item.id}`,
                     debit: 0,
@@ -71,7 +83,7 @@ const getLedgerEntries = async (req, res) => {
                 });
                 rows.push({
                     date: entryDate,
-                    account: item.category || 'Biaya',
+                    account: bebanAkun,
                     description: item.description || `Pengeluaran ${item.category}`,
                     reference: `CF-${item.id}`,
                     debit: Number(item.amount || 0),
@@ -82,18 +94,19 @@ const getLedgerEntries = async (req, res) => {
         });
 
         const [invoiceRows] = await db.query(`
-            SELECT id, invoice_number, total, due_date, notes, createdAt
-            FROM Invoice
-            ORDER BY COALESCE(due_date, createdAt) ASC, id ASC
-        `);
+    SELECT id, invoice_number, total, due_date, notes, createdAt, status
+    FROM Invoice
+    WHERE status IN ('acc', 'partial', 'overdue')
+    ORDER BY COALESCE(due_date, createdAt) ASC, id ASC
+`);
 
         invoiceRows.forEach((item) => {
-            const entryDate = formatDate(item.due_date || item.createdAt);
+            const entryDate = formatDate(item.createdAt);
             if (!filterByMonthYear(entryDate, month, year)) return;
 
             rows.push({
                 date: entryDate,
-                account: 'Piutang Usaha',
+                account: coaMap['1200'] || 'Piutang Usaha',
                 description: item.notes || `Invoice ${item.invoice_number || item.id}`,
                 reference: `INV-${item.id}`,
                 debit: Number(item.total || 0),
@@ -102,7 +115,7 @@ const getLedgerEntries = async (req, res) => {
             });
             rows.push({
                 date: entryDate,
-                account: 'Pendapatan Jasa',
+                account: coaMap['4100'] || 'Pendapatan Jasa',
                 description: item.notes || `Invoice ${item.invoice_number || item.id}`,
                 reference: `INV-${item.id}`,
                 debit: 0,
@@ -111,36 +124,9 @@ const getLedgerEntries = async (req, res) => {
             });
         });
 
-        const [unearnedRows] = await db.query(`
-            SELECT id, amount, category, received_date, notes, status
-            FROM UnearnedRevenue
-            ORDER BY received_date ASC, id ASC
-        `);
-
-        unearnedRows.forEach((item) => {
-            const entryDate = formatDate(item.received_date);
-            if (!filterByMonthYear(entryDate, month, year)) return;
-            if (item.status === 'recognized') return;
-
-            rows.push({
-                date: entryDate,
-                account: 'Kas',
-                description: item.notes || `Unearned Revenue ${item.category || ''}`,
-                reference: `UR-${item.id}`,
-                debit: Number(item.amount || 0),
-                credit: 0,
-                source: 'unearned'
-            });
-            rows.push({
-                date: entryDate,
-                account: 'Pendapatan Diterima di Muka',
-                description: item.notes || `Unearned Revenue ${item.category || ''}`,
-                reference: `UR-${item.id}`,
-                debit: 0,
-                credit: Number(item.amount || 0),
-                source: 'unearned'
-            });
-        });
+        // UnearnedRevenue tidak lagi diproses di sini
+        // Pembayaran DP/termin sudah dicatat otomatis di Cashflow (coa_code 2200)
+        // saat addPayment dipanggil dari Invoice
 
         rows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         res.json(rows);

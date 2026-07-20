@@ -15,6 +15,7 @@ app.use('/api/fixedasset', require('./src/routes/fixedasset.routes'));
 app.use('/api/liability', require('./src/routes/liability.routes'));
 
 app.use('/api/unearned', require('./src/routes/unearned.routes'));
+app.use('/api/contract', require('./src/routes/contract.routes'));
 app.use('/api/ledger', require('./src/routes/ledger.routes'));
 app.use('/api/coa', require('./src/routes/coa.routes'));
 app.use('/api/inventory', require('./src/routes/inventory.routes'));

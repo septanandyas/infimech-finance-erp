@@ -7,12 +7,12 @@ const getSaldo = async (req, res) => {
         const months = [];
         for (let m = 1; m <= 12; m++) {
             const [rows] = await db.query(`
-                SELECT 
-                    SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as income,
-                    SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense
-                FROM Cashflow
-                WHERE MONTH(date) = ? AND YEAR(date) = ?
-            `, [m, targetYear]);
+    SELECT 
+        SUM(CASE WHEN type='income' AND (coa_code = '4100' OR coa_code IS NULL OR coa_code NOT IN ('2200','4100')) THEN amount ELSE 0 END) as income,
+        SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense
+    FROM Cashflow
+    WHERE MONTH(date) = ? AND YEAR(date) = ?
+`, [m, targetYear]);
             months.push({
                 month: m,
                 income: rows[0].income || 0,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, CheckCircle, Clock, AlertCircle, FileText, Pencil, Eye, Download } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, AlertCircle, FileText, Pencil, Eye, Download, CreditCard, History } from 'lucide-react';
 import { formatRupiah, formatDate } from '../lib/utils';
 import { cn } from '../lib/utils';
 import { PDFDownloadLink, PDFViewer } from '@react-pdf/renderer';
@@ -10,6 +10,8 @@ import InvoicePDF from '../components/InvoicePDF';
 const STATUS_CONFIG = {
     draft: { label: 'Draft', color: 'text-slate-500 bg-slate-100 border-slate-300', icon: FileText },
     sent: { label: 'Terkirim', color: 'text-sky-600 bg-sky-50 border-sky-200', icon: Clock },
+    acc: { label: 'ACC/Deal', color: 'text-violet-600 bg-violet-50 border-violet-200', icon: CheckCircle },
+    partial: { label: 'Sebagian Dibayar', color: 'text-amber-600 bg-amber-50 border-amber-200', icon: CreditCard },
     paid: { label: 'Lunas', color: 'text-emerald-600 bg-emerald-50 border-emerald-200', icon: CheckCircle },
     overdue: { label: 'Jatuh Tempo', color: 'text-red-600 bg-red-50 border-red-200', icon: AlertCircle },
 };
@@ -23,19 +25,31 @@ const TAX_OPTIONS = [
 
 const EMPTY_FORM = {
     doc_type: 'INV', rev_number: '1', rev_version: 'A',
-    projectId: '', client_name: '', due_date: '', notes: '', payment_terms: '',
+    projectId: '', contractId: '', client_name: '', due_date: '', notes: '', payment_terms: '',
     tax_label: 'PPN', tax_rate: 11, tax_key: 'PPN',
+    invoice_type: 'termin',
     items: [{ description: '', quantity: 1, unit_price: 0, total: 0 }]
 };
 
 export default function Invoice() {
     const [invoices, setInvoices] = useState([]);
     const [prospects, setProspects] = useState([]);
+    const [contracts, setContracts] = useState([]);
     const [showForm, setShowForm] = useState(false);
     const [filterStatus, setFilterStatus] = useState('');
     const [editingId, setEditingId] = useState(null);
     const [previewInvoice, setPreviewInvoice] = useState(null);
     const [form, setForm] = useState(EMPTY_FORM);
+    const [paymentModal, setPaymentModal] = useState(null); // invoice yang sedang dibayar
+    const [payments, setPayments] = useState([]);
+    const [paymentForm, setPaymentForm] = useState({
+        amount: '', payment_date: new Date().toISOString().slice(0, 10),
+        payment_type: 'dp', notes: ''
+    });
+    const [editingPaymentId, setEditingPaymentId] = useState(null);
+    const [editPaymentForm, setEditPaymentForm] = useState({
+        amount: '', payment_date: '', payment_type: 'dp', notes: ''
+    });
 
     const fetchInvoices = async () => {
         try {
@@ -45,7 +59,10 @@ export default function Invoice() {
     };
 
     useEffect(() => { fetchInvoices(); }, [filterStatus]);
-    useEffect(() => { axios.get('/api/invoice/prospects').then(r => setProspects(r.data)).catch(() => { }); }, []);
+    useEffect(() => {
+        axios.get('/api/invoice/prospects').then(r => setProspects(r.data)).catch(() => { });
+        axios.get('/api/contract').then(r => setContracts(r.data)).catch(() => { });
+    }, []);
 
     const updateItem = (index, field, value) => {
         const items = [...form.items];
@@ -85,6 +102,8 @@ export default function Invoice() {
             setForm({
                 invoice_number: data.invoice_number,
                 projectId: data.projectId || '',
+                contractId: data.contractId || '',
+                invoice_type: data.invoice_type || 'termin',
                 client_name: data.client_name,
                 due_date: data.due_date?.slice(0, 10) || '',
                 notes: data.notes || '',
@@ -116,15 +135,36 @@ export default function Invoice() {
         } catch { toast.error(editingId ? 'Gagal memperbarui invoice' : 'Gagal membuat invoice'); }
     };
 
-    const handleStatusChange = async (id, status) => {
+    const handleStatusChange = async (inv, status) => {
         try {
-            await axios.patch(`/api/invoice/${id}/status`, {
+            // If marking as paid, send the remaining amount as payment to keep cashflow/piutang consistent
+            if (status === 'paid') {
+                const remaining = Number(inv.total || 0) - Number(inv.paid_amount || 0);
+                if (remaining > 0) {
+                    const ok = window.confirm(`Tandai lunas dan catat pembayaran sisa ${formatRupiah(remaining)} sebagai Pelunasan?`);
+                    if (!ok) {
+                        fetchInvoices(); // revert select
+                        return;
+                    }
+                    await axios.patch(`/api/invoice/${inv.id}/status`, {
+                        status,
+                        paid_date: new Date().toISOString().slice(0, 10),
+                        amount: remaining,
+                        payment_type: 'pelunasan'
+                    });
+                    toast.success('Status diperbarui dan pembayaran dicatat!');
+                    fetchInvoices();
+                    return;
+                }
+            }
+
+            await axios.patch(`/api/invoice/${inv.id}/status`, {
                 status,
                 paid_date: status === 'paid' ? new Date().toISOString().slice(0, 10) : null
             });
             toast.success('Status diperbarui!');
             fetchInvoices();
-        } catch { toast.error('Gagal update status'); }
+        } catch (err) { toast.error(err.response?.data?.message || 'Gagal update status'); }
     };
 
     const handleDelete = async (id) => {
@@ -134,6 +174,77 @@ export default function Invoice() {
             toast.success('Invoice dihapus!');
             fetchInvoices();
         } catch { toast.error('Gagal menghapus'); }
+    };
+
+    const openPaymentModal = async (inv) => {
+        setPaymentModal(inv);
+        try {
+            const res = await axios.get(`/api/invoice/${inv.id}/payments`);
+            setPayments(res.data);
+        } catch { setPayments([]); }
+        setPaymentForm({
+            amount: '', payment_date: new Date().toISOString().slice(0, 10),
+            payment_type: 'dp', notes: ''
+        });
+    };
+
+    const handleAddPayment = async (e) => {
+        e.preventDefault();
+        try {
+            const res = await axios.post(`/api/invoice/${paymentModal.id}/payments`, paymentForm);
+            toast.success('Pembayaran dicatat!');
+            fetchInvoices();
+            // Refresh modal dengan data terbaru
+            const paymentsRes = await axios.get(`/api/invoice/${paymentModal.id}/payments`);
+            setPayments(paymentsRes.data);
+            // Update paymentModal dengan status terbaru
+            const invRes = await axios.get(`/api/invoice/${paymentModal.id}`);
+            setPaymentModal(invRes.data);
+            setPaymentForm({ ...paymentForm, amount: '', notes: '' });
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Gagal mencatat pembayaran');
+        }
+    };
+
+    const handleEditPayment = (p) => {
+        setEditingPaymentId(p.id);
+        setEditPaymentForm({
+            amount: p.amount,
+            payment_date: p.payment_date?.slice(0, 10),
+            payment_type: p.payment_type,
+            notes: p.notes || ''
+        });
+    };
+
+    const handleUpdatePayment = async (e) => {
+        e.preventDefault();
+        try {
+            await axios.put(`/api/invoice/${paymentModal.id}/payments/${editingPaymentId}`, editPaymentForm);
+            toast.success('Pembayaran diperbarui!');
+            setEditingPaymentId(null);
+            fetchInvoices();
+            const paymentsRes = await axios.get(`/api/invoice/${paymentModal.id}/payments`);
+            setPayments(paymentsRes.data);
+            const invRes = await axios.get(`/api/invoice/${paymentModal.id}`);
+            setPaymentModal(invRes.data);
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Gagal memperbarui pembayaran');
+        }
+    };
+
+    const handleDeletePayment = async (paymentId) => {
+        if (!confirm('Hapus pembayaran ini?')) return;
+        try {
+            await axios.delete(`/api/invoice/${paymentModal.id}/payments/${paymentId}`);
+            toast.success('Pembayaran dihapus!');
+            fetchInvoices();
+            const paymentsRes = await axios.get(`/api/invoice/${paymentModal.id}/payments`);
+            setPayments(paymentsRes.data);
+            const invRes = await axios.get(`/api/invoice/${paymentModal.id}`);
+            setPaymentModal(invRes.data);
+        } catch (err) {
+            toast.error(err.response?.data?.message || 'Gagal menghapus pembayaran');
+        }
     };
 
     return (
@@ -182,18 +293,22 @@ export default function Invoice() {
 
             {/* Filter */}
             <div className="flex gap-2 flex-wrap">
-                {['', 'draft', 'sent', 'paid', 'overdue'].map(s => {
+                {['', 'draft', 'sent', 'acc', 'partial', 'paid', 'overdue'].map(s => {
                     const activeColors = {
                         '': 'bg-slate-500 text-white border-slate-500',
                         'draft': 'bg-slate-400 text-white border-slate-400',
-                        'sent': 'bg-blue-500 text-white border-blue-500',
+                        'sent': 'bg-sky-500 text-white border-sky-500',
+                        'acc': 'bg-violet-500 text-white border-violet-500',
+                        'partial': 'bg-amber-500 text-white border-amber-500',
                         'paid': 'bg-emerald-500 text-white border-emerald-500',
                         'overdue': 'bg-red-500 text-white border-red-500',
                     };
                     const inactiveColors = {
                         '': 'text-slate-500 border-slate-200 hover:border-slate-400',
                         'draft': 'text-slate-400 border-slate-200 hover:border-slate-400',
-                        'sent': 'text-blue-500 border-blue-200 hover:border-blue-400',
+                        'sent': 'text-sky-500 border-sky-200 hover:border-sky-400',
+                        'acc': 'text-violet-500 border-violet-200 hover:border-violet-400',
+                        'partial': 'text-amber-500 border-amber-200 hover:border-amber-400',
                         'paid': 'text-emerald-500 border-emerald-200 hover:border-emerald-400',
                         'overdue': 'text-red-500 border-red-200 hover:border-red-400',
                     };
@@ -202,7 +317,7 @@ export default function Invoice() {
                             className={cn("px-4 py-1.5 rounded-lg text-sm font-medium transition-colors border",
                                 filterStatus === s ? activeColors[s] : inactiveColors[s]
                             )}>
-                            {s === '' ? 'Semua' : STATUS_CONFIG[s].label}
+                            {s === '' ? 'Semua' : STATUS_CONFIG[s]?.label}
                         </button>
                     );
                 })}
@@ -244,8 +359,34 @@ export default function Invoice() {
                                 </select>
                             </div>
                             <div>
+                                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Kontrak (Opsional)</label>
+                                <select value={form.contractId} onChange={e => setForm({ ...form, contractId: e.target.value })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500">
+                                    <option value="">Pilih kontrak...</option>
+                                    {contracts
+                                        .filter(c => !form.projectId || c.projectId === form.projectId)
+                                        .map(c => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.contract_number ? `${c.contract_number} — ` : ''}{c.projectName} ({formatRupiah(c.contract_value)})
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+                            <div>
                                 <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Nama Client</label>
                                 <input value={form.client_name} onChange={e => setForm({ ...form, client_name: e.target.value })} required placeholder="PT. ..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tipe Invoice</label>
+                                <select
+                                    value={form.invoice_type || 'termin'}
+                                    onChange={e => setForm({ ...form, invoice_type: e.target.value })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                                >
+                                    <option value="dp">Down Payment (DP)</option>
+                                    <option value="termin">Termin</option>
+                                    <option value="pelunasan">Pelunasan</option>
+                                </select>
                             </div>
                         </div>
 
@@ -357,15 +498,34 @@ export default function Invoice() {
                                 <p className="text-xs text-slate-400 mt-0.5">Jatuh tempo: {formatDate(inv.due_date)}</p>
                             </div>
                             <div className="flex items-center gap-3">
-                                <p className="text-xl font-bold text-sky-600">{formatRupiah(inv.total)}</p>
+                                <div className="text-right">
+                                    <p className="text-xl font-bold text-sky-600">{formatRupiah(inv.total)}</p>
+                                    {inv.paid_amount > 0 && (
+                                        <p className="text-xs text-slate-400">
+                                            Terbayar: <span className="text-emerald-600 font-medium">{formatRupiah(inv.paid_amount)}</span>
+                                            {' · '}Sisa: <span className="text-red-500 font-medium">{formatRupiah(inv.total - inv.paid_amount)}</span>
+                                        </p>
+                                    )}
+                                </div>
                                 <select
                                     value={inv.status}
-                                    onChange={e => handleStatusChange(inv.id, e.target.value)}
-                                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500"
+                                    onChange={e => handleStatusChange(inv, e.target.value)}
+                                    disabled={['partial', 'paid'].includes(inv.status)}
+                                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                                    {Object.entries(STATUS_CONFIG)
+                                        .filter(([k]) => !['partial', 'paid'].includes(k))
+                                        .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                                 </select>
-                                <button onClick={() => setPreviewInvoice(inv)} className="text-slate-400 hover:text-sky-500 transition-colors" title="Preview & Download PDF">
+                                <button onClick={() => openPaymentModal(inv)} className={cn(
+                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors",
+                                    ['acc', 'partial'].includes(inv.status)
+                                        ? "bg-emerald-500 hover:bg-emerald-600 text-white"
+                                        : "text-slate-400 hover:text-violet-500 border border-slate-200"
+                                )} title={['acc', 'partial'].includes(inv.status) ? "Catat Pembayaran" : "Riwayat Pembayaran"}>
+                                    {['acc', 'partial'].includes(inv.status) ? <><CreditCard size={13} /> Bayar</> : <History size={15} />}
+                                </button>
+                                <button onClick={() => setPreviewInvoice(inv)} className="text-slate-400 hover:text-sky-500 transition-colors" title="Preview PDF">
                                     <Eye size={16} />
                                 </button>
                                 <button onClick={() => handleEdit(inv)} className="text-slate-400 hover:text-sky-500 transition-colors" title="Edit">
@@ -379,6 +539,144 @@ export default function Invoice() {
                     );
                 })}
             </div>
+            {/* Modal Pembayaran */}
+            {paymentModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 flex justify-between items-start">
+                            <div>
+                                <h3 className="font-bold text-slate-800">{paymentModal.invoice_number}</h3>
+                                <p className="text-sm text-slate-500 mt-0.5">{paymentModal.client_name}</p>
+                                <div className="flex gap-4 mt-2 text-xs">
+                                    <span>Total: <span className="font-bold text-slate-800">{formatRupiah(paymentModal.total)}</span></span>
+                                    <span>Terbayar: <span className="font-bold text-emerald-600">{formatRupiah(paymentModal.paid_amount || 0)}</span></span>
+                                    <span>Sisa: <span className="font-bold text-red-500">{formatRupiah(paymentModal.total - (paymentModal.paid_amount || 0))}</span></span>
+                                </div>
+                            </div>
+                            <button onClick={() => setPaymentModal(null)} className="text-slate-400 hover:text-slate-700 font-bold text-xl px-2">✕</button>
+                        </div>
+
+                        {/* Form tambah pembayaran */}
+                        {['acc', 'partial'].includes(paymentModal.status) && (
+                            <div className="p-5 border-b border-slate-100 bg-slate-50">
+                                <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wider mb-3">Catat Pembayaran Baru</h4>
+                                <form onSubmit={handleAddPayment} className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tipe</label>
+                                            <select
+                                                value={paymentForm.payment_type}
+                                                onChange={e => setPaymentForm({ ...paymentForm, payment_type: e.target.value })}
+                                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                                            >
+                                                <option value="dp">Down Payment</option>
+                                                <option value="termin">Termin</option>
+                                                <option value="pelunasan">Pelunasan</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tanggal</label>
+                                            <input
+                                                type="date"
+                                                value={paymentForm.payment_date}
+                                                onChange={e => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
+                                                required
+                                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Jumlah (Rp)</label>
+                                        <input
+                                            type="number"
+                                            value={paymentForm.amount}
+                                            onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                                            required
+                                            placeholder="0"
+                                            min="1"
+                                            max={paymentModal.total - (paymentModal.paid_amount || 0)}
+                                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                                        />
+                                        {paymentForm.amount && (
+                                            <span className="text-xs text-slate-400 mt-0.5 block">{formatRupiah(Number(paymentForm.amount))}</span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Catatan</label>
+                                        <input
+                                            value={paymentForm.notes}
+                                            onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                                            placeholder="Keterangan pembayaran..."
+                                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
+                                        />
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                        <button type="submit" className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold transition-colors">
+                                            Simpan Pembayaran
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+
+                        {/* Riwayat pembayaran */}
+                        <div className="p-5 max-h-64 overflow-y-auto">
+                            <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wider mb-3">Riwayat Pembayaran</h4>
+                            {payments.length === 0 ? (
+                                <p className="text-slate-400 text-sm italic text-center py-4">Belum ada pembayaran</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {payments.map(p => (
+                                        <div key={p.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                            {editingPaymentId === p.id ? (
+                                                <form onSubmit={handleUpdatePayment} className="space-y-2">
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <select value={editPaymentForm.payment_type} onChange={e => setEditPaymentForm({ ...editPaymentForm, payment_type: e.target.value })}
+                                                            className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500">
+                                                            <option value="dp">Down Payment</option>
+                                                            <option value="termin">Termin</option>
+                                                            <option value="pelunasan">Pelunasan</option>
+                                                        </select>
+                                                        <input type="date" value={editPaymentForm.payment_date} onChange={e => setEditPaymentForm({ ...editPaymentForm, payment_date: e.target.value })}
+                                                            required className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500" />
+                                                    </div>
+                                                    <input type="number" value={editPaymentForm.amount} onChange={e => setEditPaymentForm({ ...editPaymentForm, amount: e.target.value })}
+                                                        required className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500" />
+                                                    <input value={editPaymentForm.notes} onChange={e => setEditPaymentForm({ ...editPaymentForm, notes: e.target.value })}
+                                                        placeholder="Catatan..." className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500" />
+                                                    <div className="flex justify-end gap-2">
+                                                        <button type="button" onClick={() => setEditingPaymentId(null)} className="px-3 py-1 text-xs text-slate-500 hover:text-slate-800">Batal</button>
+                                                        <button type="submit" className="px-3 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded-lg text-xs font-bold">Simpan</button>
+                                                    </div>
+                                                </form>
+                                            ) : (
+                                                <div className="flex justify-between items-center">
+                                                    <div>
+                                                        <p className="text-sm font-medium text-slate-800">
+                                                            {p.payment_type === 'dp' ? 'Down Payment' : p.payment_type === 'termin' ? 'Termin' : 'Pelunasan'}
+                                                        </p>
+                                                        <p className="text-xs text-slate-400">{formatDate(p.payment_date)} · {p.createdByName}</p>
+                                                        {p.notes && <p className="text-xs text-slate-500 mt-0.5">{p.notes}</p>}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm font-bold text-emerald-600">{formatRupiah(p.amount)}</span>
+                                                        <button onClick={() => handleEditPayment(p)} className="text-slate-300 hover:text-sky-500 transition-colors">
+                                                            <Pencil size={13} />
+                                                        </button>
+                                                        <button onClick={() => handleDeletePayment(p.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                                            <Trash2 size={13} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

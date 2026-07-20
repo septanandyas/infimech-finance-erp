@@ -10,6 +10,7 @@ import Cashflow from './pages/Cashflow';
 import Invoice from './pages/Invoice';
 import Neraca from './pages/Neraca';
 import AsetTetap from './pages/AsetTetap';
+import Kontrak from './pages/Kontrak';
 import Kewajiban from './pages/Kewajiban';
 
 import UnearnedRevenue from './pages/UnearnedRevenue';
@@ -39,6 +40,7 @@ function AppRoutes() {
                 <Route path="invoice" element={<Invoice />} />
                 <Route path="neraca" element={<Neraca />} />
                 <Route path="aset-tetap" element={<AsetTetap />} />
+                <Route path="kontrak" element={<Kontrak />} />
                 <Route path="kewajiban" element={<Kewajiban />} />
                 <Route path="unearned-revenue" element={<UnearnedRevenue />} />
                 <Route path="buku-besar" element={<BukuBesar />} />

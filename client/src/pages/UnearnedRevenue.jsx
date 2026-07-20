@@ -4,7 +4,7 @@ import { toast } from 'react-toastify';
 import { Plus, Trash2, Clock3, CheckCircle2, AlertCircle } from 'lucide-react';
 import { formatRupiah, formatDate, cn } from '../lib/utils';
 
-const CATEGORIES = ['Advance', 'Down Payment', 'Retainer', 'Lain-lain'];
+const CATEGORIES = ['Down Payment', 'Progress Payment', 'Pelunasan'];
 
 const EMPTY_FORM = {
     invoiceId: '',
@@ -34,8 +34,8 @@ export default function UnearnedRevenue() {
 
     useEffect(() => {
         fetchEntries();
-        axios.get('/api/invoice').then(res => setInvoices(res.data || [])).catch(() => {});
-        axios.get('/api/invoice/prospects').then(res => setProspects(res.data || [])).catch(() => {});
+        axios.get('/api/invoice?status=sent').then(res => setInvoices(res.data || [])).catch(() => { });
+        axios.get('/api/invoice/prospects').then(res => setProspects(res.data || [])).catch(() => { });
     }, []);
 
     const handleSubmit = async (e) => {
@@ -107,7 +107,10 @@ export default function UnearnedRevenue() {
                             <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Invoice</label>
                             <select
                                 value={form.invoiceId}
-                                onChange={(e) => setForm({ ...form, invoiceId: e.target.value })}
+                                onChange={(e) => {
+                                    const inv = invoices.find(i => String(i.id) === e.target.value);
+                                    setForm({ ...form, invoiceId: e.target.value, projectId: inv?.projectId || '' });
+                                }}
                                 required
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500"
                             >

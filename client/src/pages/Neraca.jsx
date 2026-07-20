@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { formatRupiah } from '../lib/utils';
 import { cn } from '../lib/utils';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Download, FileSpreadsheet, Printer } from 'lucide-react';
 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -51,6 +55,86 @@ export default function Neraca() {
 
     const { current, previous } = data;
 
+    const handleExportExcel = () => {
+        const rows = [
+            ['NERACA - PT INFIMECH'],
+            [`Periode: ${MONTHS[month - 1]} ${year}`],
+            [],
+            ['Keterangan', `${MONTHS[month - 1]} ${year}`, `${MONTHS[prevMonth - 1]} ${prevYear}`, 'Selisih'],
+            ['ASET', '', '', ''],
+            ['Aset Lancar', '', '', ''],
+            ['Kas & Setara Kas', current.aset.lancar.kas, previous.aset.lancar.kas, current.aset.lancar.kas - previous.aset.lancar.kas],
+            ['Piutang Usaha', current.aset.lancar.piutang, previous.aset.lancar.piutang, current.aset.lancar.piutang - previous.aset.lancar.piutang],
+            ['Total Aset Lancar', current.aset.lancar.total, previous.aset.lancar.total, current.aset.lancar.total - previous.aset.lancar.total],
+            ['Aset Tetap', '', '', ''],
+            ...current.aset.tetap.categories.map(cat => [
+                cat.category,
+                cat.book_value,
+                previous.aset.tetap.categories.find(c => c.category === cat.category)?.book_value || 0,
+                cat.book_value - (previous.aset.tetap.categories.find(c => c.category === cat.category)?.book_value || 0)
+            ]),
+            ['Total Aset Tetap', current.aset.tetap.total, previous.aset.tetap.total, current.aset.tetap.total - previous.aset.tetap.total],
+            ['TOTAL ASET', current.aset.total, previous.aset.total, current.aset.total - previous.aset.total],
+            [],
+            ['KEWAJIBAN', '', '', ''],
+            ...current.kewajiban.jangka_pendek.categories.map(cat => [
+                cat.category,
+                cat.total,
+                previous.kewajiban.jangka_pendek.categories.find(c => c.category === cat.category)?.total || 0,
+                cat.total - (previous.kewajiban.jangka_pendek.categories.find(c => c.category === cat.category)?.total || 0)
+            ]),
+            ['Total Jangka Pendek', current.kewajiban.jangka_pendek.total, previous.kewajiban.jangka_pendek.total, current.kewajiban.jangka_pendek.total - previous.kewajiban.jangka_pendek.total],
+            ['TOTAL KEWAJIBAN', current.kewajiban.total, previous.kewajiban.total, current.kewajiban.total - previous.kewajiban.total],
+            [],
+            ['MODAL', '', '', ''],
+            ['Modal Bersih', current.modal.total, previous.modal.total, current.modal.total - previous.modal.total],
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Neraca');
+        XLSX.writeFile(wb, `Neraca_${MONTHS[month - 1]}_${year}.xlsx`);
+    };
+
+    const handleExportPDF = () => {
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text('NERACA - PT INFIMECH', 14, 15);
+        doc.setFontSize(11);
+        doc.text(`Periode: ${MONTHS[month - 1]} ${year}`, 14, 23);
+
+        autoTable(doc, {
+            startY: 30,
+            head: [['Keterangan', `${MONTHS[month - 1]} ${year}`, `${MONTHS[prevMonth - 1]} ${prevYear}`, 'Selisih']],
+            body: [
+                ['ASET', '', '', ''],
+                ['Kas & Setara Kas', formatRupiah(current.aset.lancar.kas), formatRupiah(previous.aset.lancar.kas), formatRupiah(current.aset.lancar.kas - previous.aset.lancar.kas)],
+                ['Piutang Usaha', formatRupiah(current.aset.lancar.piutang), formatRupiah(previous.aset.lancar.piutang), formatRupiah(current.aset.lancar.piutang - previous.aset.lancar.piutang)],
+                ['Total Aset Lancar', formatRupiah(current.aset.lancar.total), formatRupiah(previous.aset.lancar.total), formatRupiah(current.aset.lancar.total - previous.aset.lancar.total)],
+                ['Total Aset Tetap', formatRupiah(current.aset.tetap.total), formatRupiah(previous.aset.tetap.total), formatRupiah(current.aset.tetap.total - previous.aset.tetap.total)],
+                ['TOTAL ASET', formatRupiah(current.aset.total), formatRupiah(previous.aset.total), formatRupiah(current.aset.total - previous.aset.total)],
+                ['KEWAJIBAN', '', '', ''],
+                ['Total Jangka Pendek', formatRupiah(current.kewajiban.jangka_pendek.total), formatRupiah(previous.kewajiban.jangka_pendek.total), formatRupiah(current.kewajiban.jangka_pendek.total - previous.kewajiban.jangka_pendek.total)],
+                ['Total Jangka Panjang', formatRupiah(current.kewajiban.jangka_panjang.total), formatRupiah(previous.kewajiban.jangka_panjang.total), formatRupiah(current.kewajiban.jangka_panjang.total - previous.kewajiban.jangka_panjang.total)],
+                ['TOTAL KEWAJIBAN', formatRupiah(current.kewajiban.total), formatRupiah(previous.kewajiban.total), formatRupiah(current.kewajiban.total - previous.kewajiban.total)],
+                ['MODAL', '', '', ''],
+                ['Modal Bersih', formatRupiah(current.modal.total), formatRupiah(previous.modal.total), formatRupiah(current.modal.total - previous.modal.total)],
+            ],
+            styles: { fontSize: 9 },
+            headStyles: { fillColor: [14, 165, 233] },
+            didParseCell: (data) => {
+                if (['ASET', 'KEWAJIBAN', 'MODAL', 'TOTAL ASET', 'TOTAL KEWAJIBAN'].includes(data.cell.text[0])) {
+                    data.cell.styles.fontStyle = 'bold';
+                    data.cell.styles.fillColor = [241, 245, 249];
+                }
+            }
+        });
+
+        doc.save(`Neraca_${MONTHS[month - 1]}_${year}.pdf`);
+    };
+
+    const handlePrint = () => window.print();
+
     return (
         <div className="space-y-6">
             <div className="flex flex-wrap justify-between items-center gap-4">
@@ -66,6 +150,30 @@ export default function Neraca() {
                         {[2023, 2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                 </div>
+            </div>
+
+            <div className="flex gap-2">
+                <button
+                    onClick={handleExportExcel}
+                    className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors"
+                    title="Export Excel"
+                >
+                    <FileSpreadsheet size={15} /> Excel
+                </button>
+                <button
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors"
+                    title="Export PDF"
+                >
+                    <Download size={15} /> PDF
+                </button>
+                <button
+                    onClick={handlePrint}
+                    className="flex items-center gap-2 bg-slate-500 hover:bg-slate-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition-colors"
+                    title="Print"
+                >
+                    <Printer size={15} /> Print
+                </button>
             </div>
 
             {/* Summary cards */}

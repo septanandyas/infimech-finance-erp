@@ -130,7 +130,7 @@ export default function InvoicePDF({ invoice }) {
                         <Image src="/ttd_pak_aji.png" style={{ width: 100, height: 50, marginBottom: 5 }} />
                         <View style={{ borderBottomWidth: 1, borderBottomColor: '#334155', width: 140, marginBottom: 4 }} />
                         <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1e293b' }}>AJI CANDRA LESTARI</Text>
-                        <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1e293b' }}>Direktur Utama</Text>
+                        <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#1e293b' }}>Direktur</Text>
                         <Text style={{ fontSize: 8, color: '#64748b' }}>PT Infimech Harmoni Teknologi</Text>
                     </View>
                 </View>
