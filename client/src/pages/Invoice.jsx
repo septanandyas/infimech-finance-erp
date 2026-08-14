@@ -64,6 +64,17 @@ export default function Invoice() {
         axios.get('/api/contract').then(r => setContracts(r.data)).catch(() => { });
     }, []);
 
+    const handlePreview = (inv) => {
+        const contract = contracts.find(c => c.id === inv.contractId);
+        setPreviewInvoice({
+            ...inv,
+            contract_number: contract?.contract_number || null,
+            contract_value: contract?.contract_value ?? null,
+            contract_paid: contract?.total_paid ?? null,
+            contract_outstanding: contract?.outstanding ?? null,
+        });
+    };
+
     const updateItem = (index, field, value) => {
         const items = [...form.items];
         items[index][field] = value;
@@ -486,54 +497,66 @@ export default function Invoice() {
                 {invoices.map(inv => {
                     const statusCfg = STATUS_CONFIG[inv.status];
                     return (
-                        <div key={inv.id} className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-wrap justify-between items-center gap-4 shadow-sm">
-                            <div>
-                                <div className="flex items-center gap-3 mb-1">
-                                    <span className="font-bold text-slate-800">{inv.invoice_number}</span>
-                                    <span className={cn("text-xs px-2 py-0.5 rounded-full border font-bold flex items-center gap-1", statusCfg.color)}>
-                                        <statusCfg.icon size={11} /> {statusCfg.label}
+                        <div key={inv.id} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 shadow-sm">
+                            <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                    <span className="font-bold text-slate-800 text-sm sm:text-base">{inv.invoice_number}</span>
+                                    <span className={cn("text-[10px] sm:text-xs px-2 py-0.5 rounded-full border font-bold flex items-center gap-1 whitespace-nowrap", statusCfg.color)}>
+                                        <statusCfg.icon size={10} /> {statusCfg.label}
                                     </span>
                                 </div>
-                                <p className="text-sm text-slate-500">{inv.client_name} {inv.projectName && `· ${inv.projectName}`}</p>
-                                <p className="text-xs text-slate-400 mt-0.5">Jatuh tempo: {formatDate(inv.due_date)}</p>
+                                <p className="text-xs sm:text-sm text-slate-500 truncate">{inv.client_name} {inv.projectName && `· ${inv.projectName}`}</p>
+                                <p className="text-[10px] sm:text-xs text-slate-400 mt-0.5">Jatuh tempo: {formatDate(inv.due_date)}</p>
                             </div>
-                            <div className="flex items-center gap-3">
-                                <div className="text-right">
-                                    <p className="text-xl font-bold text-sky-600">{formatRupiah(inv.total)}</p>
+                            <div className="flex flex-wrap sm:flex-nowrap items-center justify-between sm:justify-end gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                                <div className="text-left sm:text-right w-full sm:w-auto">
+                                    <p className="text-lg sm:text-xl font-bold text-sky-600">{formatRupiah(inv.total)}</p>
                                     {inv.paid_amount > 0 && (
-                                        <p className="text-xs text-slate-400">
-                                            Terbayar: <span className="text-emerald-600 font-medium">{formatRupiah(inv.paid_amount)}</span>
-                                            {' · '}Sisa: <span className="text-red-500 font-medium">{formatRupiah(inv.total - inv.paid_amount)}</span>
+                                        <p className="text-[10px] sm:text-xs text-slate-400">
+                                            Terbayar: <span className="text-emerald-600 font-medium whitespace-nowrap">{formatRupiah(inv.paid_amount)}</span>
+                                            {' · '}Sisa: <span className="text-red-500 font-medium whitespace-nowrap">{formatRupiah(inv.total - inv.paid_amount)}</span>
                                         </p>
                                     )}
                                 </div>
-                                <select
-                                    value={inv.status}
-                                    onChange={e => handleStatusChange(inv, e.target.value)}
-                                    disabled={['partial', 'paid'].includes(inv.status)}
-                                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {Object.entries(STATUS_CONFIG)
-                                        .filter(([k]) => !['partial', 'paid'].includes(k))
-                                        .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                                </select>
-                                <button onClick={() => openPaymentModal(inv)} className={cn(
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors",
-                                    ['acc', 'partial'].includes(inv.status)
-                                        ? "bg-emerald-500 hover:bg-emerald-600 text-white"
-                                        : "text-slate-400 hover:text-violet-500 border border-slate-200"
-                                )} title={['acc', 'partial'].includes(inv.status) ? "Catat Pembayaran" : "Riwayat Pembayaran"}>
-                                    {['acc', 'partial'].includes(inv.status) ? <><CreditCard size={13} /> Bayar</> : <History size={15} />}
-                                </button>
-                                <button onClick={() => setPreviewInvoice(inv)} className="text-slate-400 hover:text-sky-500 transition-colors" title="Preview PDF">
-                                    <Eye size={16} />
-                                </button>
-                                <button onClick={() => handleEdit(inv)} className="text-slate-400 hover:text-sky-500 transition-colors" title="Edit">
-                                    <Pencil size={15} />
-                                </button>
-                                <button onClick={() => handleDelete(inv.id)} className="text-slate-300 hover:text-red-500 transition-colors" title="Hapus">
-                                    <Trash2 size={16} />
-                                </button>
+                                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                                    <select
+                                        value={inv.status}
+                                        onChange={e => handleStatusChange(inv, e.target.value)}
+                                        disabled={['partial', 'paid'].includes(inv.status)}
+                                        className="bg-slate-50 border border-slate-200 rounded-lg px-2 sm:px-3 py-1.5 text-slate-800 text-xs focus:outline-none focus:border-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {Object.entries(STATUS_CONFIG)
+                                            .filter(([k]) => !['partial', 'paid'].includes(k))
+                                            .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                                    </select>
+                                    <button onClick={() => openPaymentModal(inv)} className={cn(
+                                        "flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap",
+                                        ['acc', 'partial'].includes(inv.status)
+                                            ? "bg-emerald-500 hover:bg-emerald-600 text-white"
+                                            : "text-slate-400 hover:text-violet-500 border border-slate-200"
+                                    )} title={['acc', 'partial'].includes(inv.status) ? "Catat Pembayaran" : "Riwayat Pembayaran"}>
+                                        {['acc', 'partial'].includes(inv.status) ? (
+                                            <>
+                                                <CreditCard size={13} />
+                                                <span className="hidden sm:inline">Bayar</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <History size={13} />
+                                                <span className="hidden sm:inline">Riwayat</span>
+                                            </>
+                                        )}
+                                    </button>
+                                    <button onClick={() => handlePreview(inv)} className="text-slate-400 hover:text-sky-500 transition-colors p-1" title="Preview PDF">
+                                        <Eye size={16} />
+                                    </button>
+                                    <button onClick={() => handleEdit(inv)} className="text-slate-400 hover:text-sky-500 transition-colors p-1" title="Edit">
+                                        <Pencil size={15} />
+                                    </button>
+                                    <button onClick={() => handleDelete(inv.id)} className="text-slate-350 hover:text-red-500 transition-colors p-1" title="Hapus">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     );

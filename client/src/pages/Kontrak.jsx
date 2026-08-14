@@ -164,6 +164,11 @@ export default function Kontrak() {
                             <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
                                 placeholder="Keterangan tambahan..." className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
                         </div>
+                        <select value={form.revenue_coa_code} onChange={e => setForm({ ...form, revenue_coa_code: e.target.value })}>
+                            <option value="4100">Simulasi CFD</option>
+                            <option value="4200">Simulasi FEA</option>
+                            <option value="4300">Konsultasi & Training</option>
+                        </select>
                         <div className="md:col-span-2 flex justify-end gap-2">
                             <button type="button" onClick={resetForm} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800 transition-colors">Batal</button>
                             <button type="submit" className="px-6 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-bold transition-colors">
@@ -176,49 +181,51 @@ export default function Kontrak() {
 
             {/* Table */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Project</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">No. Kontrak</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Tgl Kontrak</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Nilai Kontrak</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Terbayar</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Piutang</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Status</th>
-                            <th className="px-6 py-4"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {data.length === 0 && (
-                            <tr><td colSpan={8} className="text-center text-slate-400 py-12 italic">Belum ada data kontrak</td></tr>
-                        )}
-                        {data.map(row => (
-                            <tr key={row.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4">
-                                    <p className="text-sm font-medium text-slate-800">{row.projectName}</p>
-                                    <p className="text-xs text-slate-400">{row.client_name}</p>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{row.contract_number || '-'}</td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{formatDate(row.contract_date)}</td>
-                                <td className="px-6 py-4 text-sm font-bold text-slate-800 text-right">{formatRupiah(row.contract_value)}</td>
-                                <td className="px-6 py-4 text-sm text-emerald-600 font-medium text-right">{formatRupiah(row.total_paid || 0)}</td>
-                                <td className="px-6 py-4 text-sm text-red-600 font-medium text-right">{formatRupiah(row.outstanding || 0)}</td>
-                                <td className="px-6 py-4">
-                                    <span className={cn("text-xs px-2 py-1 rounded-lg font-medium border", STATUS_CONFIG[row.status]?.color)}>
-                                        {STATUS_CONFIG[row.status]?.label}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => handleEdit(row)} className="text-slate-300 hover:text-sky-500 transition-colors"><Pencil size={15} /></button>
-                                        <button onClick={() => handleDelete(row.id)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
-                                    </div>
-                                </td>
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[768px]">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Project</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">No. Kontrak</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Tgl Kontrak</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Nilai Kontrak</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Terbayar</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Piutang</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Status</th>
+                                <th className="px-3 sm:px-6 py-4"></th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {data.length === 0 && (
+                                <tr><td colSpan={8} className="text-center text-slate-400 py-12 italic">Belum ada data kontrak</td></tr>
+                            )}
+                            {data.map(row => (
+                                <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <p className="text-sm font-medium text-slate-800">{row.projectName}</p>
+                                        <p className="text-xs text-slate-400">{row.client_name}</p>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{row.contract_number || '-'}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 whitespace-nowrap">{formatDate(row.contract_date)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-slate-800 text-right whitespace-nowrap">{formatRupiah(row.contract_value)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-emerald-600 font-medium text-right whitespace-nowrap">{formatRupiah(row.total_paid || 0)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-red-600 font-medium text-right whitespace-nowrap">{formatRupiah(row.outstanding || 0)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <span className={cn("text-xs px-2 py-1 rounded-lg font-medium border whitespace-nowrap", STATUS_CONFIG[row.status]?.color)}>
+                                            {STATUS_CONFIG[row.status]?.label}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => handleEdit(row)} className="text-slate-300 hover:text-sky-500 transition-colors"><Pencil size={15} /></button>
+                                            <button onClick={() => handleDelete(row.id)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );

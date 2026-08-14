@@ -186,16 +186,17 @@ export default function UnearnedRevenue() {
             )}
 
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px]">
                     <thead>
                         <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tanggal</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Invoice</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Project</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Kategori</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Jumlah</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Status</th>
-                            <th className="px-6 py-4"></th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tanggal</th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Invoice</th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Project</th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Kategori</th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Jumlah</th>
+                            <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Status</th>
+                            <th className="px-3 sm:px-6 py-4"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -206,14 +207,14 @@ export default function UnearnedRevenue() {
                         )}
                         {entries.map(item => (
                             <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4 text-sm text-slate-600">{formatDate(item.received_date)}</td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{item.invoice_number || `INV-${item.invoiceId}`}</td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{item.projectName || item.projectId}</td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{item.category}</td>
-                                <td className="px-6 py-4 text-sm font-bold text-right text-slate-700">{formatRupiah(item.amount || 0)}</td>
-                                <td className="px-6 py-4">
+                                <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.received_date)}</td>
+                                <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{item.invoice_number || `INV-${item.invoiceId}`}</td>
+                                <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{item.projectName || item.projectId}</td>
+                                <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{item.category}</td>
+                                <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-right text-slate-700 whitespace-nowrap">{formatRupiah(item.amount || 0)}</td>
+                                <td className="px-3 sm:px-6 py-3 sm:py-4">
                                     <span className={cn(
-                                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border',
+                                        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap',
                                         item.status === 'recognized'
                                             ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
                                             : 'bg-amber-50 text-amber-600 border-amber-200'
@@ -222,7 +223,7 @@ export default function UnearnedRevenue() {
                                         {item.status === 'recognized' ? 'Diakui' : 'Pending'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-3 sm:px-6 py-3 sm:py-4">
                                     <button
                                         onClick={() => handleDelete(item.id)}
                                         className="text-slate-300 hover:text-red-500 transition-colors"
@@ -236,6 +237,7 @@ export default function UnearnedRevenue() {
                         ))}
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );

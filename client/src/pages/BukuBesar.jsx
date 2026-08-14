@@ -131,15 +131,16 @@ export default function BukuBesar() {
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[560px]">
                     <thead>
                         <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Tanggal</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Akun</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Keterangan</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Ref</th>
-                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Debit</th>
-                            <th className="px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Kredit</th>
+                            <th className="px-3 sm:px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Tanggal</th>
+                            <th className="px-3 sm:px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Akun</th>
+                            <th className="px-3 sm:px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Keterangan</th>
+                            <th className="px-3 sm:px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Ref</th>
+                            <th className="px-3 sm:px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Debit</th>
+                            <th className="px-3 sm:px-4 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Kredit</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -150,16 +151,17 @@ export default function BukuBesar() {
                         )}
                         {entries.map((row, index) => (
                             <tr key={`${row.reference}-${index}`} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-4 py-3 text-slate-600">{row.date}</td>
-                                <td className="px-4 py-3 text-slate-700 font-medium">{row.account}</td>
-                                <td className="px-4 py-3 text-slate-600">{row.description}</td>
-                                <td className="px-4 py-3 text-slate-500">{row.reference}</td>
-                                <td className="px-4 py-3 text-right text-emerald-600">{formatRupiah(row.debit || 0)}</td>
-                                <td className="px-4 py-3 text-right text-sky-600">{formatRupiah(row.credit || 0)}</td>
+                                <td className="px-3 sm:px-4 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
+                                <td className="px-3 sm:px-4 py-3 text-slate-700 font-medium">{row.account}</td>
+                                <td className="px-3 sm:px-4 py-3 text-slate-600">{row.description}</td>
+                                <td className="px-3 sm:px-4 py-3 text-slate-500">{row.reference}</td>
+                                <td className="px-3 sm:px-4 py-3 text-right text-emerald-600 whitespace-nowrap">{formatRupiah(row.debit || 0)}</td>
+                                <td className="px-3 sm:px-4 py-3 text-right text-sky-600 whitespace-nowrap">{formatRupiah(row.credit || 0)}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );

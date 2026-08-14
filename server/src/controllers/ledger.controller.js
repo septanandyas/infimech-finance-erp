@@ -1,4 +1,5 @@
 const db = require('../utils/db');
+const { autoInsertDepreciation } = require('./journal.controller');
 
 const formatDate = (value) => {
     if (!value) return null;
@@ -29,6 +30,11 @@ const getLedgerEntries = async (req, res) => {
     try {
         const { month, year } = req.query;
         const rows = [];
+
+        // Auto-insert penyusutan bulan ini kalau belum ada
+        if (month && year) {
+            await autoInsertDepreciation(parseInt(month), parseInt(year));
+        }
 
         // Fetch COA untuk mapping
         const [coaRows] = await db.query('SELECT code, name FROM ChartOfAccount');
@@ -93,40 +99,70 @@ const getLedgerEntries = async (req, res) => {
             }
         });
 
-        const [invoiceRows] = await db.query(`
-    SELECT id, invoice_number, total, due_date, notes, createdAt, status
-    FROM Invoice
-    WHERE status IN ('acc', 'partial', 'overdue')
-    ORDER BY COALESCE(due_date, createdAt) ASC, id ASC
-`);
+        const [contractRows] = await db.query(`
+            SELECT c.id, c.contract_number, c.contract_value, c.contract_date,
+           p.name_project, p.client_name,
+           COALESCE(SUM(ip.amount / (1 + COALESCE(i.tax_rate, 0) / 100)), 0) as total_paid
+            FROM ProjectContract c
+            JOIN Prospect p ON c.projectId = p.no_project
+            LEFT JOIN Invoice i ON i.contractId = c.id AND i.status IN ('acc','partial','paid')
+            LEFT JOIN InvoicePayment ip ON ip.invoiceId = i.id
+            WHERE c.status = 'active'
+            GROUP BY c.id
+        `);
 
-        invoiceRows.forEach((item) => {
-            const entryDate = formatDate(item.createdAt);
+        contractRows.forEach((item) => {
+            const entryDate = formatDate(item.contract_date);
             if (!filterByMonthYear(entryDate, month, year)) return;
+
+            const outstanding = Number(item.contract_value) - Number(item.total_paid);
+            if (outstanding <= 0) return;
 
             rows.push({
                 date: entryDate,
                 account: coaMap['1200'] || 'Piutang Usaha',
-                description: item.notes || `Invoice ${item.invoice_number || item.id}`,
-                reference: `INV-${item.id}`,
-                debit: Number(item.total || 0),
+                description: `Piutang kontrak - ${item.name_project} (${item.client_name})`,
+                reference: `CTR-${item.id}`,
+                debit: outstanding,
                 credit: 0,
-                source: 'invoice'
+                source: 'contract'
             });
             rows.push({
                 date: entryDate,
-                account: coaMap['4100'] || 'Pendapatan Jasa',
-                description: item.notes || `Invoice ${item.invoice_number || item.id}`,
-                reference: `INV-${item.id}`,
+                account: coaMap['2200'] || 'Pendapatan Diterima di Muka',
+                description: `Piutang kontrak - ${item.name_project} (${item.client_name})`,
+                reference: `CTR-${item.id}`,
                 debit: 0,
-                credit: Number(item.total || 0),
-                source: 'invoice'
+                credit: outstanding,
+                source: 'contract'
             });
         });
 
         // UnearnedRevenue tidak lagi diproses di sini
         // Pembayaran DP/termin sudah dicatat otomatis di Cashflow (coa_code 2200)
         // saat addPayment dipanggil dari Invoice
+
+        // Tambahkan jurnal non-kas (penyusutan, dll)
+        const [journalRows] = await db.query(`
+    SELECT j.journal_date, j.reference, je.coa_code, je.description as entry_desc, je.debit, je.credit
+    FROM Journal j
+    JOIN JournalEntry je ON je.journalId = j.id
+    WHERE j.period_month = ? AND j.period_year = ?
+    ORDER BY j.journal_date ASC
+`, [month || new Date().getMonth() + 1, year || new Date().getFullYear()]);
+
+        journalRows.forEach(row => {
+            const entryDate = row.journal_date?.toISOString?.()?.slice(0, 10) || row.journal_date;
+            rows.push({
+                date: entryDate,
+                account: coaMap[row.coa_code] || row.coa_code,
+                description: row.entry_desc,
+                reference: row.reference,
+                debit: Number(row.debit || 0),
+                credit: Number(row.credit || 0),
+                source: 'journal'
+            });
+        });
 
         rows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         res.json(rows);

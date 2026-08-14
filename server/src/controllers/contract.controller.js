@@ -29,11 +29,11 @@ c.contract_value - COALESCE(SUM(ip.amount / (1 + COALESCE(i.tax_rate, 0) / 100))
 
 const createContract = async (req, res) => {
     try {
-        const { projectId, contract_number, contract_value, contract_date, status, notes } = req.body;
+        const { projectId, contract_number, contract_value, contract_date, status, notes, revenue_coa_code } = req.body;
         const [result] = await db.query(
-            `INSERT INTO ProjectContract (projectId, contract_number, contract_value, contract_date, status, notes, createdBy, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [projectId, contract_number || null, contract_value, contract_date, status || 'active', notes || null, req.userId]
+            `INSERT INTO ProjectContract (projectId, contract_number, contract_value, contract_date, revenue_coa_code, status, notes, createdBy, createdAt, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [projectId, contract_number || null, contract_value, contract_date, revenue_coa_code || '4100', status || 'active', notes || null, req.userId]
         );
         res.json({ id: result.insertId, message: 'Contract created' });
     } catch (error) {

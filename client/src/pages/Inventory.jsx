@@ -16,8 +16,8 @@ export default function Inventory() {
     const [logs, setLogs] = useState([]);
     const [showLogModal, setShowLogModal] = useState(false);
     const [showLogForm, setShowLogForm] = useState(false);
-    const [form, setForm] = useState({ name: '', category: '', quantity: '', unit: '', unit_price: '' });
-    const [logForm, setLogForm] = useState({ type: 'in', quantity: '', note: '' });
+    const [form, setForm] = useState({ name: '', category: '', quantity: '', unit: '', unit_price: '', entry_type: 'purchase', log_date: new Date().toISOString().slice(0, 10) });
+    const [logForm, setLogForm] = useState({ type: 'in', quantity: '', note: '', entry_type: 'purchase', log_date: new Date().toISOString().slice(0, 10) });
 
     const fetchItems = async () => {
         try {
@@ -41,17 +41,37 @@ export default function Inventory() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        // Konfirmasi kalau pembelian baru
+        if (!editingId && form.entry_type === 'purchase') {
+            const totalCost = Number(form.quantity) * Number(form.unit_price);
+            const confirmed = confirm(
+                `Pembelian ${form.name} sebanyak ${form.quantity} ${form.unit} senilai ${formatRupiah(totalCost)} akan dicatat sebagai pengeluaran kas di Cashflow. Lanjutkan?`
+            );
+            if (!confirmed) return;
+        }
+
         try {
             if (editingId) {
                 await axios.put(`/api/inventory/${editingId}`, form);
                 toast.success('Item diperbarui!');
             } else {
-                await axios.post('/api/inventory', form);
+                // Buat item dulu
+                const res = await axios.post('/api/inventory', form);
+                // Catat log awal dengan entry_type
+                await axios.post('/api/inventory/log', {
+                    inventoryId: res.data.id,
+                    type: 'in',
+                    quantity: Number(form.quantity),
+                    note: form.entry_type === 'opening_balance' ? 'Saldo awal persediaan' : 'Pembelian awal',
+                    entry_type: form.entry_type,
+                    log_date: form.log_date
+                });
                 toast.success('Item ditambahkan!');
             }
             setShowForm(false);
             setEditingId(null);
-            setForm({ name: '', category: '', quantity: '', unit: '', unit_price: '' });
+            setForm({ name: '', category: '', quantity: '', unit: '', unit_price: '', entry_type: 'purchase', log_date: new Date().toISOString().slice(0, 10) });
             fetchItems();
         } catch {
             toast.error('Gagal menyimpan item');
@@ -92,6 +112,16 @@ export default function Inventory() {
 
     const handleLogSubmit = async (e) => {
         e.preventDefault();
+
+        // Konfirmasi kalau barang masuk pembelian baru
+        if (logForm.type === 'in' && logForm.entry_type === 'purchase') {
+            const totalCost = Number(logForm.quantity) * Number(selectedItem.unit_price);
+            const confirmed = confirm(
+                `Penambahan ${logForm.quantity} ${selectedItem.unit} ${selectedItem.name} senilai ${formatRupiah(totalCost)} akan dicatat sebagai pengeluaran kas di Cashflow. Lanjutkan?`
+            );
+            if (!confirmed) return;
+        }
+
         try {
             await axios.post('/api/inventory/log', {
                 inventoryId: selectedItem.id,
@@ -99,7 +129,7 @@ export default function Inventory() {
                 quantity: Number(logForm.quantity)
             });
             toast.success(logForm.type === 'in' ? 'Barang masuk dicatat!' : 'Barang keluar dicatat!');
-            setLogForm({ type: 'in', quantity: '', note: '' });
+            setLogForm({ type: 'in', quantity: '', note: '', entry_type: 'purchase', log_date: new Date().toISOString().slice(0, 10) });
             setShowLogForm(false);
             await fetchLog(selectedItem.id);
             fetchItems();
@@ -201,6 +231,47 @@ export default function Inventory() {
                                 <span className="text-xs text-slate-400 mt-1 block">{formatRupiah(Number(form.unit_price))}</span>
                             )}
                         </div>
+                        {!editingId && (
+                            <div className="md:col-span-2">
+                                <label className="text-xs text-slate-500 font-bold uppercase block mb-2">Tipe Input</label>
+                                <div className="flex gap-3">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" value="purchase" checked={form.entry_type === 'purchase'}
+                                            onChange={() => setForm({ ...form, entry_type: 'purchase' })}
+                                            className="accent-sky-500" />
+                                        <span className="text-sm text-slate-700 font-medium">Pembelian Baru</span>
+                                        <span className="text-xs text-slate-400">(ada uang keluar, masuk cashflow)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="radio" value="opening_balance" checked={form.entry_type === 'opening_balance'}
+                                            onChange={() => setForm({ ...form, entry_type: 'opening_balance' })}
+                                            className="accent-sky-500" />
+                                        <span className="text-sm text-slate-700 font-medium">Saldo Awal</span>
+                                        <span className="text-xs text-slate-400">(barang sudah ada sebelumnya)</span>
+                                    </label>
+                                </div>
+                                {form.entry_type === 'purchase' && (
+                                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+                                        ⚠️ Akan muncul konfirmasi sebelum dicatat ke cashflow sebagai pengeluaran {formatRupiah(Number(form.quantity) * Number(form.unit_price) || 0)}
+                                    </div>
+                                )}
+                                {form.entry_type === 'opening_balance' && (
+                                    <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-500">
+                                        ℹ️ Tidak masuk cashflow. Nilai persediaan tetap tercatat di neraca.
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!editingId && form.entry_type === 'purchase' && (
+                            <div>
+                                <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tanggal Pembelian</label>
+                                <input type="date" value={form.log_date}
+                                    onChange={e => setForm({ ...form, log_date: e.target.value })}
+                                    required
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
+                            </div>
+                        )}
                         <div className="md:col-span-2 flex justify-end gap-2">
                             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-800">Batal</button>
                             <button type="submit" className="px-6 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-bold">Simpan</button>
@@ -211,69 +282,71 @@ export default function Inventory() {
 
             {/* Tabel Inventory */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Nama Barang</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Kategori</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Stok</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Harga Satuan</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Total Nilai</th>
-                            <th className="px-6 py-4"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {items.length === 0 && (
-                            <tr><td colSpan={6} className="text-center text-slate-400 py-12 italic">Belum ada item persediaan</td></tr>
-                        )}
-                        {items.map(item => (
-                            <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                        <Package size={16} className="text-sky-400" />
-                                        <span className="text-sm font-medium text-slate-800">{item.name}</span>
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-medium">
-                                        {item.category || '-'}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    <span className={cn(
-                                        "text-sm font-bold",
-                                        Number(item.quantity) <= 5 ? "text-red-600" :
-                                            Number(item.quantity) <= 10 ? "text-amber-600" : "text-slate-800"
-                                    )}>
-                                        {item.quantity} {item.unit}
-                                    </span>
-                                    {Number(item.quantity) <= 5 && (
-                                        <span className="block text-xs text-red-500 mt-0.5">⚠️ Stok menipis</span>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-600 text-right">{formatRupiah(item.unit_price)}</td>
-                                <td className="px-6 py-4 text-sm font-bold text-sky-600 text-right">{formatRupiah(item.total_value)}</td>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2 justify-end">
-                                        <button
-                                            onClick={() => openLog(item)}
-                                            className="text-slate-400 hover:text-sky-500 transition-colors"
-                                            title="Riwayat & Keluar Masuk"
-                                        >
-                                            <History size={16} />
-                                        </button>
-                                        <button onClick={() => handleEdit(item)} className="text-slate-400 hover:text-sky-500 transition-colors">
-                                            <Pencil size={15} />
-                                        </button>
-                                        <button onClick={() => handleDelete(item.id)} className="text-slate-400 hover:text-red-500 transition-colors">
-                                            <Trash2 size={15} />
-                                        </button>
-                                    </div>
-                                </td>
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px]">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Nama Barang</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Kategori</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Stok</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Harga Satuan</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Total Nilai</th>
+                                <th className="px-3 sm:px-6 py-4"></th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {items.length === 0 && (
+                                <tr><td colSpan={6} className="text-center text-slate-400 py-12 italic">Belum ada item persediaan</td></tr>
+                            )}
+                            {items.map(item => (
+                                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <div className="flex items-center gap-2">
+                                            <Package size={16} className="text-sky-400" />
+                                            <span className="text-sm font-medium text-slate-800">{item.name}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-medium whitespace-nowrap">
+                                            {item.category || '-'}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-center">
+                                        <span className={cn(
+                                            "text-sm font-bold whitespace-nowrap",
+                                            Number(item.quantity) <= 5 ? "text-red-600" :
+                                                Number(item.quantity) <= 10 ? "text-amber-600" : "text-slate-800"
+                                        )}>
+                                            {item.quantity} {item.unit}
+                                        </span>
+                                        {Number(item.quantity) <= 5 && (
+                                            <span className="block text-[10px] text-red-500 mt-0.5">⚠️ Stok menipis</span>
+                                        )}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 text-right whitespace-nowrap">{formatRupiah(item.unit_price)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-sky-600 text-right whitespace-nowrap">{formatRupiah(item.total_value)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <div className="flex items-center gap-2 justify-end">
+                                            <button
+                                                onClick={() => openLog(item)}
+                                                className="text-slate-450 hover:text-sky-500 transition-colors"
+                                                title="Riwayat & Keluar Masuk"
+                                            >
+                                                <History size={16} />
+                                            </button>
+                                            <button onClick={() => handleEdit(item)} className="text-slate-450 hover:text-sky-500 transition-colors">
+                                                <Pencil size={15} />
+                                            </button>
+                                            <button onClick={() => handleDelete(item.id)} className="text-slate-450 hover:text-red-500 transition-colors">
+                                                <Trash2 size={15} />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* Modal Riwayat & Input Keluar Masuk */}
@@ -310,6 +383,34 @@ export default function Inventory() {
                                                 <option value="out">Barang Keluar</option>
                                             </select>
                                         </div>
+                                        {/* Hanya tampil kalau barang masuk */}
+                                        {logForm.type === 'in' && (
+                                            <>
+                                                <div className="md:col-span-2">
+                                                    <label className="text-xs text-slate-500 font-bold uppercase block mb-2">Tipe Penambahan</label>
+                                                    <div className="flex gap-3">
+                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="radio" value="purchase" checked={logForm.entry_type === 'purchase'}
+                                                                onChange={() => setLogForm({ ...logForm, entry_type: 'purchase' })}
+                                                                className="accent-sky-500" />
+                                                            <span className="text-sm text-slate-700">Pembelian Baru</span>
+                                                        </label>
+                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="radio" value="opening_balance" checked={logForm.entry_type === 'opening_balance'}
+                                                                onChange={() => setLogForm({ ...logForm, entry_type: 'opening_balance' })}
+                                                                className="accent-sky-500" />
+                                                            <span className="text-sm text-slate-700">Saldo Awal</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Tanggal</label>
+                                                    <input type="date" value={logForm.log_date}
+                                                        onChange={e => setLogForm({ ...logForm, log_date: e.target.value })}
+                                                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                            </>
+                                        )}
                                         <div>
                                             <label className="text-xs text-slate-500 font-bold uppercase block mb-1">Jumlah</label>
                                             <input

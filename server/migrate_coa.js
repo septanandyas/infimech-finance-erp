@@ -9,6 +9,7 @@ const accounts = [
     { group: 'Aset', subgroup: 'Aset Tetap', code: '1500', name: 'Software & Lisensi', description: 'Aset tetap tak berwujud' },
     { group: 'Kewajiban', subgroup: 'Kewajiban Jangka Pendek', code: '2100', name: 'Utang Usaha', description: 'Utang kepada pemasok atau pihak ketiga' },
     { group: 'Kewajiban', subgroup: 'Kewajiban Jangka Pendek', code: '2200', name: 'Pendapatan Diterima di Muka', description: 'Pembayaran dari klien untuk pekerjaan belum selesai' },
+    { group: 'Kewajiban', subgroup: 'Kewajiban Jangka Pendek', code: '2400', name: 'Utang PPN', description: 'PPN Keluaran yang dipungut dari klien dan harus disetor' },
     { group: 'Ekuitas', subgroup: 'Modal', code: '3100', name: 'Modal Disetor', description: 'Modal dari pendiri atau pemilik perusahaan' },
     { group: 'Ekuitas', subgroup: 'Modal', code: '3200', name: 'Laba Ditahan', description: 'Laba yang diputar kembali ke perusahaan' },
     { group: 'Pendapatan', subgroup: 'Pendapatan', code: '4100', name: 'Pendapatan Jasa Simulasi CFD', description: 'Pendapatan dari proyek simulasi CFD' },
@@ -19,7 +20,8 @@ const accounts = [
     { group: 'Beban', subgroup: 'Harga Pokok Jasa', code: '5300', name: 'Amortisasi Lisensi Software', description: 'Pembebanan lisensi software ke proyek' },
     { group: 'Beban', subgroup: 'Beban Operasional', code: '6100', name: 'Gaji Manajemen, Admin & Marketing', description: 'Biaya operasional internal' },
     { group: 'Beban', subgroup: 'Beban Operasional', code: '6200', name: 'Sewa Kantor & Utilitas', description: 'Biaya kantor, listrik, internet dan utilitas' },
-    { group: 'Beban', subgroup: 'Beban Operasional', code: '6300', name: 'Beban Pemasaran & Representasi', description: 'Biaya promosi dan menjamu klien' }
+    { group: 'Beban', subgroup: 'Beban Operasional', code: '6300', name: 'Beban Pemasaran & Representasi', description: 'Biaya promosi dan menjamu klien' },
+    { group: 'Beban', subgroup: 'Beban Operasional', code: '6400', name: 'Beban Pajak', description: 'Penyetoran PPN, PPh final, atau pajak perusahaan lainnya' }
 ];
 
 async function run() {

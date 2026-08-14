@@ -32,6 +32,13 @@ const styles = StyleSheet.create({
     grandTotalRow: { flexDirection: 'row', justifyContent: 'space-between', width: 200 },
     grandTotalLabel: { fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#0ea5e9' },
     grandTotalValue: { fontSize: 11, fontFamily: 'Helvetica-Bold', color: '#0ea5e9' },
+    contractBox: { backgroundColor: '#f0f9ff', borderRadius: 4, padding: 10, marginBottom: 20, borderWidth: 1, borderColor: '#e0f2fe' },
+    contractTitle: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#0369a1', textTransform: 'uppercase', marginBottom: 6 },
+    contractRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
+    contractLabel: { fontSize: 9, color: '#475569' },
+    contractValue: { fontSize: 9, color: '#1e293b' },
+    contractOutstandingLabel: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#0369a1' },
+    contractOutstandingValue: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#0369a1' },
     notesBox: { backgroundColor: '#f8fafc', borderRadius: 4, padding: 10, marginBottom: 20 },
     notesLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 },
     notesText: { fontSize: 9, color: '#475569' },
@@ -54,6 +61,12 @@ export default function InvoicePDF({ invoice }) {
     // Total = Subtotal + Pajak (harga final yang harus dibayar client)
     const total = subtotal + tax;
     const hasTax = invoice.tax_rate > 0 && invoice.tax_label;
+    const hasContract = invoice.contract_value !== null && invoice.contract_value !== undefined;
+    const contractValue = Number(invoice.contract_value) || 0;
+    const contractPaid = Number(invoice.contract_paid) || 0;
+    const contractOutstanding = invoice.contract_outstanding !== null && invoice.contract_outstanding !== undefined
+        ? Number(invoice.contract_outstanding)
+        : contractValue - contractPaid;
 
     return (
         <Document>
@@ -118,10 +131,30 @@ export default function InvoicePDF({ invoice }) {
                     </View>
                     {hasTax && (
                         <Text style={{ fontSize: 8, color: '#94a3b8', marginTop: 5, fontStyle: 'italic' }}>
-                            *Harga sudah termasuk {invoice.tax_label} {invoice.tax_rate}%
+                            *Harga total setelah {invoice.tax_label} {invoice.tax_rate}%
                         </Text>
                     )}
                 </View>
+
+                {hasContract && (
+                    <View style={styles.contractBox}>
+                        <Text style={styles.contractTitle}>
+                            Ringkasan Kontrak{invoice.contract_number ? ` — ${invoice.contract_number}` : ''}
+                        </Text>
+                        <View style={styles.contractRow}>
+                            <Text style={styles.contractLabel}>Nilai Kontrak</Text>
+                            <Text style={styles.contractValue}>{formatRp(contractValue)}</Text>
+                        </View>
+                        <View style={styles.contractRow}>
+                            <Text style={styles.contractLabel}>Sudah Dibayar (DP/Termin)</Text>
+                            <Text style={styles.contractValue}>{formatRp(contractPaid)}</Text>
+                        </View>
+                        <View style={[styles.contractRow, { marginBottom: 0 }]}>
+                            <Text style={styles.contractOutstandingLabel}>Sisa Piutang</Text>
+                            <Text style={styles.contractOutstandingValue}>{formatRp(contractOutstanding)}</Text>
+                        </View>
+                    </View>
+                )}
 
                 {/* Tanda Tangan */}
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 24 }}>

@@ -194,22 +194,23 @@ export default function Neraca() {
 
             {/* Tabel Neraca */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px]">
                     <thead>
                         <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase text-left w-2/5">Keterangan</th>
-                            <th className="px-4 py-4 text-xs font-bold text-sky-600 uppercase text-right">{MONTHS[month - 1]} {year}</th>
-                            <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase text-right">{MONTHS[prevMonth - 1]} {prevYear}</th>
-                            <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase text-right">Selisih</th>
+                            <th className="px-3 sm:px-4 py-4 text-xs font-bold text-slate-500 uppercase text-left w-2/5">Keterangan</th>
+                            <th className="px-3 sm:px-4 py-4 text-xs font-bold text-sky-600 uppercase text-right">{MONTHS[month - 1]} {year}</th>
+                            <th className="px-3 sm:px-4 py-4 text-xs font-bold text-slate-500 uppercase text-right">{MONTHS[prevMonth - 1]} {prevYear}</th>
+                            <th className="px-3 sm:px-4 py-4 text-xs font-bold text-slate-500 uppercase text-right">Selisih</th>
                         </tr>
                     </thead>
                     <tbody>
                         {/* ASET */}
                         <tr className="bg-sky-50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-bold text-sky-700 uppercase tracking-wider">ASET</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-bold text-sky-700 uppercase tracking-wider">ASET</td>
                         </tr>
                         <tr className="bg-slate-50/50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Aset Lancar</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Aset Lancar</td>
                         </tr>
                         <NeracaRow label="Kas & Setara Kas" current={current.aset.lancar.kas} previous={previous.aset.lancar.kas} indent />
                         <NeracaRow label="Piutang Usaha" current={current.aset.lancar.piutang} previous={previous.aset.lancar.piutang} indent />
@@ -217,7 +218,7 @@ export default function Neraca() {
                         <NeracaRow label="Total Aset Lancar" current={current.aset.lancar.total} previous={previous.aset.lancar.total} bold />
 
                         <tr className="bg-slate-50/50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Aset Tetap</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Aset Tetap</td>
                         </tr>
                         {current.aset.tetap.categories.length === 0 ? (
                             <NeracaRow label="Belum ada aset tetap" current={0} previous={0} indent />
@@ -235,10 +236,10 @@ export default function Neraca() {
 
                         {/* KEWAJIBAN */}
                         <tr className="bg-red-50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-bold text-red-700 uppercase tracking-wider">KEWAJIBAN</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-bold text-red-700 uppercase tracking-wider">KEWAJIBAN</td>
                         </tr>
                         <tr className="bg-slate-50/50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Jangka Pendek</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Jangka Pendek</td>
                         </tr>
                         {current.kewajiban.jangka_pendek.categories.map((cat, i) => (
                             <NeracaRow
@@ -252,7 +253,7 @@ export default function Neraca() {
                         <NeracaRow label="Total Jangka Pendek" current={current.kewajiban.jangka_pendek.total} previous={previous.kewajiban.jangka_pendek.total} bold />
 
                         <tr className="bg-slate-50/50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Jangka Panjang</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider pl-6">Jangka Panjang</td>
                         </tr>
                         {current.kewajiban.jangka_panjang.categories.map((cat, i) => (
                             <NeracaRow
@@ -268,11 +269,12 @@ export default function Neraca() {
 
                         {/* MODAL */}
                         <tr className="bg-sky-50">
-                            <td colSpan={4} className="px-4 py-2 text-xs font-bold text-sky-700 uppercase tracking-wider">MODAL</td>
+                            <td colSpan={4} className="px-3 sm:px-4 py-2 text-xs font-bold text-sky-700 uppercase tracking-wider">MODAL</td>
                         </tr>
                         <NeracaRow label="Modal Bersih (Aset - Kewajiban)" current={current.modal.total} previous={previous.modal.total} bold />
                     </tbody>
                 </table>
+                </div>
             </div>
         </div>
     );

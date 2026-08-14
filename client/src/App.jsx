@@ -12,7 +12,8 @@ import Neraca from './pages/Neraca';
 import AsetTetap from './pages/AsetTetap';
 import Kontrak from './pages/Kontrak';
 import Kewajiban from './pages/Kewajiban';
-
+import LabaRugi from './pages/LabaRugi';
+import PerubahanModal from './pages/PerubahanModal';
 import UnearnedRevenue from './pages/UnearnedRevenue';
 import BukuBesar from './pages/BukuBesar';
 import CoA from './pages/CoA';
@@ -46,6 +47,8 @@ function AppRoutes() {
                 <Route path="buku-besar" element={<BukuBesar />} />
                 <Route path="coa" element={<CoA />} />
                 <Route path="inventory" element={<Inventory />} />
+                <Route path="laba-rugi" element={<LabaRugi />} />
+                <Route path="perubahan-modal" element={<PerubahanModal />} />
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
         </Routes>

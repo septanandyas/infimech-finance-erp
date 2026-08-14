@@ -3,6 +3,7 @@ const db = require('../utils/db');
 const getNeracaByPeriod = async (month, year) => {
     const [income] = await db.query(
         `SELECT SUM(amount) as total FROM Cashflow WHERE type='income' 
+         AND (coa_code != '4100' OR coa_code IS NULL)
          AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
         [year, year, month]
     );
@@ -12,35 +13,66 @@ const getNeracaByPeriod = async (month, year) => {
         [year, year, month]
     );
 
+    const lastDayOfMonth = new Date(year, month, 0).getDate();
+    const endOfMonthDate = new Date(year, month - 1, lastDayOfMonth, 23, 59, 59);
+
     const [piutang] = await db.query(
         `SELECT COALESCE(SUM(contract_value), 0) as total 
      FROM ProjectContract 
-     WHERE status = 'active'`
+     WHERE status = 'active'
+     AND contract_date <= ?`,
+        [endOfMonthDate]
     );
     const [sudahDibayar] = await db.query(
-        `SELECT COALESCE(SUM(ip.amount), 0) as total 
+        `SELECT COALESCE(SUM(ip.amount / (1 + COALESCE(i.tax_rate, 0) / 100)), 0) as total 
      FROM InvoicePayment ip
      JOIN Invoice i ON ip.invoiceId = i.id
      JOIN ProjectContract c ON i.contractId = c.id
      WHERE i.status IN ('acc','partial','paid')
-     AND c.status = 'active'`
+     AND c.status = 'active'
+     AND ip.payment_date <= ?`,
+        [endOfMonthDate]
     );
+    // Hitung nilai persediaan PADA AKHIR PERIODE yang diminta (bukan saldo live),
+    // direkonstruksi dari riwayat InventoryLog agar Neraca bulan lalu tidak
+    // ikut memuat pembelian yang terjadi di bulan berjalan.
+    const inventoryEndDate = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
     const [inventory] = await db.query(
-        `SELECT COALESCE(SUM(total_value), 0) as total FROM Inventory`
+        `SELECT COALESCE(SUM(
+            CASE WHEN l.type = 'in' THEN l.quantity ELSE -l.quantity END * i.unit_price
+         ), 0) as total
+         FROM InventoryLog l
+         JOIN Inventory i ON l.inventoryId = i.id
+         WHERE l.log_date <= ?`,
+        [inventoryEndDate]
+    );
+    const [uangMukaPph] = await db.query(
+        `SELECT COALESCE(SUM(je.debit) - SUM(je.credit), 0) as total
+         FROM JournalEntry je JOIN Journal j ON je.journalId = j.id
+         WHERE je.coa_code = '1310'
+         AND (j.period_year < ? OR (j.period_year = ? AND j.period_month <= ?))`,
+        [year, year, month]
     );
 
     const [assets] = await db.query(`SELECT * FROM FixedAsset`);
-    const targetDate = new Date(year, month - 1, 1);
+
     let totalAsetTetap = 0;
     const categoryMap = {};
     assets.forEach(asset => {
         const acquired = new Date(asset.acquisition_date);
-        if (acquired > targetDate) return;
-        const monthsElapsed = (targetDate.getFullYear() - acquired.getFullYear()) * 12 + (targetDate.getMonth() - acquired.getMonth());
+        if (acquired > endOfMonthDate) return;
+
+        if (asset.status === 'disposed' && asset.disposal_date) {
+            const disposed = new Date(asset.disposal_date);
+            if (disposed <= endOfMonthDate) return;
+        }
+
+        const monthsElapsed = (endOfMonthDate.getFullYear() - acquired.getFullYear()) * 12 + (endOfMonthDate.getMonth() - acquired.getMonth());
         const totalMonths = asset.useful_life_years * 12;
-        const monthlyDepreciation = asset.acquisition_value / totalMonths;
-        const accumulated = Math.min(monthlyDepreciation * monthsElapsed, asset.acquisition_value);
-        const book_value = Math.max(Number(asset.acquisition_value) - accumulated, 0);
+        const depreciableValue = Number(asset.acquisition_value) - Number(asset.salvage_value || 0);
+        const monthlyDepreciation = depreciableValue / totalMonths;
+        const accumulated = Math.min(monthlyDepreciation * monthsElapsed, depreciableValue);
+        const book_value = Math.max(Number(asset.acquisition_value) - accumulated, Number(asset.salvage_value || 0));
         totalAsetTetap += book_value;
         if (!categoryMap[asset.category]) categoryMap[asset.category] = 0;
         categoryMap[asset.category] += book_value;
@@ -51,11 +83,10 @@ const getNeracaByPeriod = async (month, year) => {
         book_value: categoryMap[category] || 0
     }));
 
-    const lastDayOfMonth = new Date(year, month, 0).getDate();
     const dateParam = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
     const [shortTerm] = await db.query(
-        `SELECT category, COALESCE(SUM(amount), 0) as total FROM Liability
+        `SELECT category, COALESCE(SUM(amount - paid_amount), 0) as total FROM Liability
          WHERE term_type='short_term'
            AND status='outstanding'
            AND DATE(start_date) <= DATE(?)
@@ -63,7 +94,7 @@ const getNeracaByPeriod = async (month, year) => {
         [dateParam]
     );
     const [longTerm] = await db.query(
-        `SELECT category, COALESCE(SUM(amount), 0) as total FROM Liability
+        `SELECT category, COALESCE(SUM(amount - paid_amount), 0) as total FROM Liability
          WHERE term_type='long_term'
            AND status='outstanding'
            AND DATE(start_date) <= DATE(?)
@@ -84,6 +115,21 @@ const getNeracaByPeriod = async (month, year) => {
      AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
         [year, year, month]
     );
+    // Koreksi 2200 yang lewat Journal (mis. potongan PPh 23), supaya konsisten
+    // dengan Buku Besar, bukan cuma dari Cashflow.
+    const [unearnedJournalAdj] = await db.query(
+        `SELECT COALESCE(SUM(je.credit) - SUM(je.debit), 0) as total
+         FROM JournalEntry je JOIN Journal j ON je.journalId = j.id
+         WHERE je.coa_code = '2200'
+         AND (j.period_year < ? OR (j.period_year = ? AND j.period_month <= ?))`,
+        [year, year, month]
+    );
+
+    // totalPiutang TIDAK ditambahkan ke sini lagi -- itu "sisa nilai kontrak
+    // yang belum ditagih", bukan uang muka yang sudah diterima. Kalau
+    // ditambahkan, sisa kontrak itu kehitung dobel: sekali sebagai Aset
+    // (piutang), sekali lagi sebagai Kewajiban (unearned).
+    const totalPiutang = Math.max((Number(piutang[0].total) || 0) - (Number(sudahDibayar[0].total) || 0), 0);
     const totalUnearned = Math.max((Number(unearned[0]?.total) || 0) - (Number(recognized[0]?.total) || 0), 0);
     const ALL_LIABILITY_CATEGORIES = ['Hutang Bank', 'Hutang Usaha', 'Hutang Pajak', 'Hutang Gaji', 'Lainnya'];
 
@@ -99,9 +145,9 @@ const getNeracaByPeriod = async (month, year) => {
     }));
 
     const kas = (Number(income[0].total) || 0) - (Number(expense[0].total) || 0);
-    const totalPiutang = Math.max((Number(piutang[0].total) || 0) - (Number(sudahDibayar[0].total) || 0), 0);
     const totalPersediaan = Number(inventory[0]?.total) || 0;
-    const totalAsetLancar = kas + totalPiutang + totalPersediaan;
+    const totalUangMukaPph = Number(uangMukaPph[0]?.total) || 0;
+    const totalAsetLancar = kas + totalPiutang + totalPersediaan + totalUangMukaPph;
     const totalShort = shortTermDetail.reduce((s, r) => s + r.total, 0);
     const totalLong = longTermDetail.reduce((s, r) => s + r.total, 0);
     const totalKewajiban = totalShort + totalLong;
@@ -109,7 +155,7 @@ const getNeracaByPeriod = async (month, year) => {
 
     return {
         aset: {
-            lancar: { kas, piutang: totalPiutang, persediaan: totalPersediaan, total: totalAsetLancar },
+            lancar: { kas, piutang: totalPiutang, persediaan: totalPersediaan, uang_muka_pph: totalUangMukaPph, total: totalAsetLancar },
             tetap: { categories: asetTetapDetail, total: totalAsetTetap },
             total: totalAset
         },

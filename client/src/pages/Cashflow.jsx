@@ -128,8 +128,8 @@ export default function Cashflow() {
 
     const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
-    const totalPiutang = invoicesOutstanding.reduce((sum, i) => sum + Number(i.total), 0);
-    const totalUtang = liabilities.filter(l => l.status === 'outstanding').reduce((sum, l) => sum + Number(l.amount), 0);
+    const totalPiutang = invoicesOutstanding.reduce((sum, i) => sum + Number(i.outstanding || 0), 0);
+    const totalUtang = liabilities.filter(l => l.status === 'outstanding').reduce((sum, l) => sum + (Number(l.amount) - Number(l.paid_amount || 0)), 0);
 
     return (
         <div className="space-y-6">
@@ -173,7 +173,7 @@ export default function Cashflow() {
                 <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-amber-600 font-bold uppercase tracking-wider mb-1">Total Piutang</p>
                     <p className="text-xl font-bold text-amber-600 leading-tight break-words w-full">{formatRupiah(totalPiutang)}</p>
-                    <p className="text-xs text-amber-500 mt-1">{invoicesOutstanding.length} invoice belum lunas</p>
+                    <p className="text-xs text-amber-500 mt-1">{invoicesOutstanding.length} kontrak belum lunas</p>
                 </div>
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-4 overflow-hidden">
                     <p className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Total Utang</p>
@@ -203,10 +203,12 @@ export default function Cashflow() {
                                 {coas
                                     .filter(c => {
                                         if (form.type === 'income') {
-                                            return c.group === 'Pendapatan' || c.code === '1100';
+                                            return c.group === 'Pendapatan' ||
+                                                c.code === '1100' ||
+                                                ['2200', '2400'].includes(c.code);
                                         } else {
                                             return c.group === 'Beban' ||
-                                                c.group === 'Kewajiban' ||
+                                                (c.group === 'Kewajiban' && !['2200', '2400'].includes(c.code)) ||
                                                 ['1300', '1350', '1400', '1500'].includes(c.code);
                                         }
                                     })
@@ -254,49 +256,51 @@ export default function Cashflow() {
 
             {/* Table */}
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                <table className="w-full">
-                    <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tanggal</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tipe</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Akun CoA</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Keterangan</th>
-                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Jumlah</th>
-                            <th className="px-6 py-4"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {data.length === 0 && (
-                            <tr><td colSpan={6} className="text-center text-slate-400 py-12 italic">Belum ada data cashflow bulan ini</td></tr>
-                        )}
-                        {data.map(row => (
-                            <tr key={row.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4 text-sm text-slate-600">{formatDate(row.date)}</td>
-                                <td className="px-6 py-4">
-                                    <span className={cn("flex items-center gap-1.5 text-xs font-bold", row.type === 'income' ? "text-emerald-600" : "text-red-600")}>
-                                        {row.type === 'income' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                                        {row.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-slate-600">{row.coa_code ? `[${row.coa_code}] ${row.coa_name}` : row.category}</td>
-                                <td className="px-6 py-4 text-sm text-slate-500">{row.description || '-'}</td>
-                                <td className={cn("px-6 py-4 text-sm font-bold text-right", row.type === 'income' ? "text-emerald-600" : "text-red-600")}>
-                                    {row.type === 'income' ? '+' : '-'}{formatRupiah(row.amount)}
-                                </td>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => handleEdit(row)} className="text-slate-300 hover:text-sky-500 transition-colors">
-                                            <Pencil size={15} />
-                                        </button>
-                                        <button onClick={() => handleDelete(row.id)} className="text-slate-300 hover:text-red-500 transition-colors">
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </td>
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[600px]">
+                        <thead>
+                            <tr className="border-b border-slate-200 bg-slate-50">
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tanggal</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Tipe</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Akun CoA</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-left">Keterangan</th>
+                                <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Jumlah</th>
+                                <th className="px-3 sm:px-6 py-4"></th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {data.length === 0 && (
+                                <tr><td colSpan={6} className="text-center text-slate-400 py-12 italic">Belum ada data cashflow bulan ini</td></tr>
+                            )}
+                            {data.map(row => (
+                                <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 whitespace-nowrap">{formatDate(row.date)}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <span className={cn("flex items-center gap-1.5 text-xs font-bold whitespace-nowrap", row.type === 'income' ? "text-emerald-600" : "text-red-600")}>
+                                            {row.type === 'income' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                                            {row.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{row.coa_code ? `[${row.coa_code}] ${row.coa_name}` : row.category}</td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-500">{row.description || '-'}</td>
+                                    <td className={cn("px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-right whitespace-nowrap", row.type === 'income' ? "text-emerald-600" : "text-red-600")}>
+                                        {row.type === 'income' ? '+' : '-'}{formatRupiah(row.amount)}
+                                    </td>
+                                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => handleEdit(row)} className="text-slate-300 hover:text-sky-500 transition-colors">
+                                                <Pencil size={15} />
+                                            </button>
+                                            <button onClick={() => handleDelete(row.id)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             {/* ===== PIUTANG ===== */}
@@ -308,77 +312,81 @@ export default function Cashflow() {
 
                 {/* Piutang Table */}
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-amber-50">
+                    <div className="px-4 sm:px-6 py-4 border-b border-slate-100 bg-amber-50">
                         <h3 className="font-bold text-amber-700 text-sm uppercase tracking-wider">Piutang Kontrak Aktif</h3>
                     </div>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-slate-200 bg-slate-50">
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Project</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Client</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">No. Kontrak</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Nilai Kontrak</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Terbayar</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Piutang</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {invoicesOutstanding.length === 0 && (
-                                <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada piutang outstanding</td></tr>
-                            )}
-                            {invoicesOutstanding.map(c => (
-                                <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-4 text-sm font-medium text-slate-700">{c.projectName}</td>
-                                    <td className="px-6 py-4 text-sm text-slate-600">{c.client_name}</td>
-                                    <td className="px-6 py-4 text-sm text-slate-600">{c.contract_number || '-'}</td>
-                                    <td className="px-6 py-4 text-sm text-slate-600 text-right">{formatRupiah(c.contract_value)}</td>
-                                    <td className="px-6 py-4 text-sm text-emerald-600 font-medium text-right">{formatRupiah(c.total_paid || 0)}</td>
-                                    <td className="px-6 py-4 text-sm font-bold text-amber-600 text-right">{formatRupiah(c.outstanding || 0)}</td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[560px]">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Project</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Client</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">No. Kontrak</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Nilai Kontrak</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Terbayar</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Piutang</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {invoicesOutstanding.length === 0 && (
+                                    <tr><td colSpan={6} className="text-center text-slate-400 py-8 italic">Tidak ada piutang outstanding</td></tr>
+                                )}
+                                {invoicesOutstanding.map(c => (
+                                    <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-medium text-slate-700">{c.projectName}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{c.client_name}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{c.contract_number || '-'}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600 text-right whitespace-nowrap">{formatRupiah(c.contract_value)}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-emerald-600 font-medium text-right whitespace-nowrap">{formatRupiah(c.total_paid || 0)}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-amber-600 text-right whitespace-nowrap">{formatRupiah(c.outstanding || 0)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
                 {/* Utang Table */}
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-red-50">
+                    <div className="px-4 sm:px-6 py-4 border-b border-slate-100 bg-red-50">
                         <h3 className="font-bold text-red-700 text-sm uppercase tracking-wider">Utang — Belum Lunas</h3>
                     </div>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-slate-200 bg-slate-50">
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Vendor</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Kategori</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jatuh Tempo</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jenis</th>
-                                <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Jumlah</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {liabilities.filter(l => l.status === 'outstanding').length === 0 && (
-                                <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada utang outstanding</td></tr>
-                            )}
-                            {liabilities.filter(l => l.status === 'outstanding').map(l => {
-                                const isOverdue = new Date(l.due_date) < new Date();
-                                return (
-                                    <tr key={l.id} className="hover:bg-slate-50 transition-colors">
-                                        <td className="px-6 py-4 text-sm font-medium text-slate-700">{l.name}</td>
-                                        <td className="px-6 py-4 text-sm text-slate-600">{l.category}</td>
-                                        <td className={`px-6 py-4 text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-slate-600'}`}>
-                                            {formatDate(l.due_date)} {isOverdue && '⚠️'}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${l.term_type === 'short_term' ? 'bg-orange-100 text-orange-600' : 'bg-purple-100 text-purple-600'}`}>
-                                                {l.term_type === 'short_term' ? 'Jangka Pendek' : 'Jangka Panjang'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm font-bold text-red-600 text-right">{formatRupiah(l.amount)}</td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[500px]">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Vendor</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Kategori</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jatuh Tempo</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-left">Jenis</th>
+                                    <th className="px-3 sm:px-6 py-3 text-xs font-bold text-slate-500 uppercase text-right">Jumlah</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {liabilities.filter(l => l.status === 'outstanding').length === 0 && (
+                                    <tr><td colSpan={5} className="text-center text-slate-400 py-8 italic">Tidak ada utang outstanding</td></tr>
+                                )}
+                                {liabilities.filter(l => l.status === 'outstanding').map(l => {
+                                    const isOverdue = new Date(l.due_date) < new Date();
+                                    return (
+                                        <tr key={l.id} className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-medium text-slate-700">{l.name}</td>
+                                            <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-600">{l.category}</td>
+                                            <td className={`px-3 sm:px-6 py-3 sm:py-4 text-sm font-medium whitespace-nowrap ${isOverdue ? 'text-red-600' : 'text-slate-600'}`}>
+                                                {formatDate(l.due_date)} {isOverdue && '⚠️'}
+                                            </td>
+                                            <td className="px-3 sm:px-6 py-3 sm:py-4">
+                                                <span className={`text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap ${l.term_type === 'short_term' ? 'bg-orange-100 text-orange-600' : 'bg-purple-100 text-purple-600'}`}>
+                                                    {l.term_type === 'short_term' ? 'Jangka Pendek' : 'Jangka Panjang'}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-red-600 text-right whitespace-nowrap">{formatRupiah(Number(l.amount) - Number(l.paid_amount || 0))}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -414,28 +422,30 @@ export default function Cashflow() {
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-slate-200 bg-slate-50">
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Bulan</th>
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pemasukan</th>
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pengeluaran</th>
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Net</th>
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Saldo Kumulatif</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {saldoData.map((row, i) => (
-                                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-4 text-sm text-slate-700 font-medium">{row.name} {year}</td>
-                                    <td className="px-6 py-4 text-sm text-emerald-600 text-right">{formatRupiah(row.income)}</td>
-                                    <td className="px-6 py-4 text-sm text-red-600 text-right">{formatRupiah(row.expense)}</td>
-                                    <td className={`px-6 py-4 text-sm font-bold text-right ${row.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatRupiah(row.net)}</td>
-                                    <td className="px-6 py-4 text-sm text-sky-600 font-bold text-right">{formatRupiah(row.balance)}</td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full min-w-[480px]">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50">
+                                    <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-left">Bulan</th>
+                                    <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pemasukan</th>
+                                    <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Pengeluaran</th>
+                                    <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Net</th>
+                                    <th className="px-3 sm:px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Saldo Kumulatif</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {saldoData.map((row, i) => (
+                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-slate-700 font-medium whitespace-nowrap">{row.name} {year}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-emerald-600 text-right whitespace-nowrap">{formatRupiah(row.income)}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-red-600 text-right whitespace-nowrap">{formatRupiah(row.expense)}</td>
+                                        <td className={`px-3 sm:px-6 py-3 sm:py-4 text-sm font-bold text-right whitespace-nowrap ${row.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatRupiah(row.net)}</td>
+                                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-sm text-sky-600 font-bold text-right whitespace-nowrap">{formatRupiah(row.balance)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

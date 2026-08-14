@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
     LayoutDashboard, TrendingUp, FileText, Package, Building2,
     AlertCircle, ReceiptText, BookOpen, LogOut, Menu, X,
-    ChevronDown, ArrowLeftRight, Layers, BarChart3, ScrollText
+    ChevronDown, ArrowLeftRight, Layers, BarChart3, ScrollText, Landmark
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -48,7 +48,9 @@ const navGroups = [
         label: 'Laporan',
         children: [
             { icon: BookOpen, label: 'Neraca', path: '/neraca' },
+            { icon: BarChart3, label: 'Laba Rugi', path: '/laba-rugi' },
             { icon: BookOpen, label: 'Buku Besar', path: '/buku-besar' },
+            { icon: Landmark, label: 'Perubahan Modal', path: '/perubahan-modal' },
         ]
     },
     {
@@ -180,7 +182,7 @@ export default function MainLayout() {
             </div>
 
             <main className="flex-1 overflow-auto pt-16 lg:pt-0">
-                <div className="p-6 md:p-8 max-w-7xl mx-auto">
+                <div className="p-3 sm:p-6 md:p-8 max-w-7xl mx-auto">
                     <Outlet />
                 </div>
             </main>

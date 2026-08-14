@@ -1,17 +1,26 @@
 const db = require('../utils/db');
 
-const determineRevenueCoa = (invoice) => {
-    try {
-        const items = invoice.items || [];
-        const text = (items.map(i => i.description || '').join(' ') + ' ' + (invoice.notes || '')).toLowerCase();
-        if (text.includes('cfd')) return '4100';
-        if (text.includes('fea')) return '4200';
-        if (text.includes('konsult') || text.includes('training') || text.includes('consult')) return '4300';
-        // Fallback to general pendapatan jasa
-        return '4100';
-    } catch (err) {
-        return '4100';
-    }
+const determineRevenueCoa = (projectName) => {
+    const name = (projectName || '').toLowerCase();
+    if (name.includes('fea')) return '4200';       // Pendapatan Jasa Simulasi FEA
+    if (name.includes('training') || name.includes('konsultasi')) return '4300';
+    return '4100'; // default: Pendapatan Jasa Simulasi CFD
+};
+
+const determineTaxCoa = (taxLabel) => {
+    if (!taxLabel) return '2400';
+    const label = taxLabel.toLowerCase();
+    if (label.includes('pph final')) return '6400'; // Beban Pajak PPh Final
+    if (label.includes('pph')) return '2500';        // Utang PPh 23 (sudah ada di COA Anda)
+    return '2400'; // Utang PPN
+};
+
+const determineTaxCategory = (taxLabel) => {
+    if (!taxLabel) return 'Utang PPN';
+    const label = taxLabel.toLowerCase();
+    if (label.includes('pph final')) return 'Beban Pajak PPh Final';
+    if (label.includes('pph')) return 'Hutang Pajak PPh 23';
+    return 'Utang PPN';
 };
 
 const getInvoices = async (req, res) => {
@@ -180,7 +189,10 @@ const addPayment = async (req, res) => {
         await conn.beginTransaction();
 
         // Ambil data invoice
-        const [invoices] = await conn.query('SELECT * FROM Invoice WHERE id = ?', [id]);
+        const [invoices] = await conn.query(
+            `SELECT i.*, p.name_project as projectName FROM Invoice i
+            LEFT JOIN Prospect p ON i.projectId = p.no_project WHERE i.id = ?`, [id]
+        );
         if (invoices.length === 0) return res.status(404).json({ message: 'Invoice not found' });
         const invoice = invoices[0];
 
@@ -192,10 +204,11 @@ const addPayment = async (req, res) => {
         }
 
         // Catat pembayaran
-        await conn.query(
+        const [paymentResult] = await conn.query(
             'INSERT INTO InvoicePayment (invoiceId, amount, payment_date, payment_type, notes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
             [id, amount, payment_date, payment_type, notes || null, req.userId]
         );
+        const newPaymentId = paymentResult.insertId;
 
         // Update paid_amount dan status invoice
         const newStatus = newPaidAmount >= Number(invoice.total) ? 'paid' : 'partial';
@@ -217,19 +230,36 @@ const addPayment = async (req, res) => {
         const taxAmount = Number(amount) - amountBeforeTax;
         console.log('tax_rate:', invoice.tax_rate, 'taxRate:', taxRate, 'amount:', amount, 'amountBeforeTax:', amountBeforeTax, 'taxAmount:', taxAmount);
 
-        // Catat kas masuk ke akun 2200 (nilai sebelum pajak)
+        // Catat kas masuk ke akun 2200 (nilai sebelum pajak SAJA)
         await conn.query(
-            `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, createdBy, createdAt, updatedAt)
-     VALUES ('income', ?, '2200', ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [categoryLabel, amountBeforeTax, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`, payment_date, invoice.projectId, req.userId]
+            `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, paymentId, createdBy, createdAt, updatedAt)
+     VALUES ('income', ?, '2200', ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [categoryLabel, amountBeforeTax, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`, payment_date, invoice.projectId, newPaymentId, req.userId]
         );
 
-        // Catat hutang PPN ke akun 2400 (kalau ada pajak)
+        // Catat pajak ke akun yang sesuai. PPh 23 non-final DAN PPN sama-sama
+        // uang yang benar-benar diterima penuh dari klien (klien transfer
+        // gross termasuk pajaknya), jadi sama-sama masuk Cashflow sebagai
+        // 'income' -- bedanya cuma akun liabilitasnya (2410 vs 2400).
+        // PPh Final saja yang beda karena itu benar-benar beban, bukan titipan.
         if (taxAmount > 0) {
+            const taxLabel = invoice.tax_label || 'PPN';
+            const taxCoa = determineTaxCoa(taxLabel);
+            const taxCat = determineTaxCategory(taxLabel);
+            const isPphFinal = taxLabel.toLowerCase().includes('pph final');
             await conn.query(
                 `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, createdBy, createdAt, updatedAt)
-     VALUES ('income', 'Hutang PPN', '2400', ?, ?, ?, ?, ?, NOW(), NOW())`,
-                [taxAmount, `PPN ${invoice.tax_rate}% Invoice ${invoice.invoice_number}`, payment_date, invoice.projectId, req.userId]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [
+                    isPphFinal ? 'expense' : 'income',
+                    taxCat,
+                    taxCoa,
+                    taxAmount,
+                    `${taxLabel} ${invoice.tax_rate}% Invoice ${invoice.invoice_number}`,
+                    payment_date,
+                    invoice.projectId,
+                    req.userId
+                ]
             );
         }
 
@@ -267,17 +297,12 @@ const addPayment = async (req, res) => {
                     const contractFullyPaid = unpaidInvoices[0].count === 0 && Math.abs(totalPaidBeforeTax - contractValue) < 1;
 
                     if (contractFullyPaid) {
-                        // Semua invoice lunas DAN total terbayar = nilai kontrak — akui pendapatan
+                        // Reklasifikasi SEMUA kas masuk 2200 milik kontrak ini jadi 4100/4200/4300
+                        // HANYA saat kontrak benar-benar selesai — bukan per-invoice.
                         await conn.query(
-                            `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, createdBy, createdAt, updatedAt)
-             VALUES ('income', 'Pendapatan Jasa', '4100', ?, ?, ?, ?, ?, NOW(), NOW())`,
-                            [
-                                contractValue,
-                                `Pendapatan diakui - Kontrak ${contract[0].contract_number || invoice.contractId} selesai`,
-                                payment_date,
-                                invoice.projectId,
-                                req.userId
-                            ]
+                            `UPDATE Cashflow SET coa_code = ?, category = 'Pendapatan Jasa'
+                             WHERE coa_code = '2200' AND type = 'income' AND projectId = ?`,
+                            [contract[0].revenue_coa_code || '4100', invoice.projectId]
                         );
                         await conn.query(
                             'UPDATE ProjectContract SET status=?, updatedAt=NOW() WHERE id=?',
@@ -352,15 +377,33 @@ const updatePayment = async (req, res) => {
             [newPaidAmount, newStatus, newStatus === 'paid' ? payment_date : null, id]
         );
 
-        // Update cashflow terkait
+        // Hitung ulang split pajak, SAMA seperti di addPayment
+        const taxRate = Number(invoice.tax_rate) || 0;
+        const amountBeforeTax = taxRate > 0 ? Number(amount) / (1 + taxRate / 100) : Number(amount);
+        const taxAmount = Number(amount) - amountBeforeTax;
         const categoryLabel = payment_type === 'dp' ? 'Down Payment' : payment_type === 'termin' ? 'Pembayaran Termin' : 'Pelunasan';
+
+        // Update baris kas (2200) berdasarkan paymentId -- bukan tebak dari teks
         await conn.query(
             `UPDATE Cashflow SET amount=?, category=?, date=?, description=?, updatedAt=NOW()
-             WHERE description LIKE ? AND coa_code='2200' AND type='income'
-             ORDER BY id DESC LIMIT 1`,
-            [amount, categoryLabel, payment_date, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`,
-                `%Invoice ${invoice.invoice_number}%`]
+             WHERE paymentId=? AND coa_code='2200'`,
+            [amountBeforeTax, categoryLabel, payment_date, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`, paymentId]
         );
+
+        // Update ATAU hapus baris pajak berdasarkan paymentId juga
+        if (taxAmount > 0) {
+            const taxLabel = invoice.tax_label || 'PPN';
+            const taxCoa = determineTaxCoa(taxLabel);
+            const taxCat = determineTaxCategory(taxLabel);
+            await conn.query(
+                `UPDATE Cashflow SET amount=?, category=?, coa_code=?, date=?, description=?, updatedAt=NOW()
+                 WHERE paymentId=? AND coa_code != '2200'`,
+                [taxAmount, taxCat, taxCoa, payment_date, `${taxLabel} ${invoice.tax_rate}% Invoice ${invoice.invoice_number}`, paymentId]
+            );
+        } else {
+            // Kalau taxAmount sekarang 0 (mis. tax_rate invoice memang 0), hapus baris pajak lama kalau ada
+            await conn.query(`DELETE FROM Cashflow WHERE paymentId=? AND coa_code != '2200'`, [paymentId]);
+        }
 
         await conn.commit();
         res.json({ message: 'Payment updated', newStatus, newPaidAmount });
@@ -377,36 +420,26 @@ const deletePayment = async (req, res) => {
     try {
         const { id, paymentId } = req.params;
         await conn.beginTransaction();
-
         const [payments] = await conn.query('SELECT * FROM InvoicePayment WHERE id = ? AND invoiceId = ?', [paymentId, id]);
         if (payments.length === 0) return res.status(404).json({ message: 'Payment not found' });
         const payment = payments[0];
-
         const [invoices] = await conn.query('SELECT * FROM Invoice WHERE id = ?', [id]);
         if (invoices.length === 0) return res.status(404).json({ message: 'Invoice not found' });
         const invoice = invoices[0];
-
         // Hapus payment
         await conn.query('DELETE FROM InvoicePayment WHERE id = ?', [paymentId]);
-
         // Recalculate paid_amount dari semua payment yang tersisa
         const [remaining] = await conn.query(
             'SELECT COALESCE(SUM(amount), 0) as total FROM InvoicePayment WHERE invoiceId = ?', [id]
         );
         const newPaidAmount = Number(remaining[0].total);
         const newStatus = newPaidAmount >= Number(invoice.total) ? 'paid' : newPaidAmount > 0 ? 'partial' : 'acc';
-
         await conn.query(
             'UPDATE Invoice SET paid_amount=?, status=?, paid_date=?, updatedAt=NOW() WHERE id=?',
             [newPaidAmount, newStatus, newStatus === 'paid' ? invoice.paid_date : null, id]
         );
-
-        // Hapus cashflow terkait
-        await conn.query(
-            `DELETE FROM Cashflow WHERE description LIKE ? AND amount=? AND coa_code='2200' AND type='income' ORDER BY id DESC LIMIT 1`,
-            [`%Invoice ${invoice.invoice_number}%`, payment.amount]
-        );
-
+        // Hapus SEMUA cashflow terkait payment ini (baris kas 2200 DAN baris pajaknya)
+        await conn.query(`DELETE FROM Cashflow WHERE paymentId = ?`, [paymentId]);
         await conn.commit();
         res.json({ message: 'Payment deleted', newStatus, newPaidAmount });
     } catch (error) {
