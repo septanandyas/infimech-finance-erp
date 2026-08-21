@@ -44,11 +44,30 @@ const getLabaRugiByPeriod = async (month, year) => {
         return Number(rows[0].total) || 0;
     };
 
+    // Helper: ambil total pendapatan per coa_code (gabungan Cashflow + JournalEntry reklasifikasi)
+    const getPendapatanByCoa = async (coa_code) => {
+        // 1. Ambil dari Cashflow
+        const [cashflowRows] = await db.query(
+            `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
+             WHERE coa_code = ? AND type = 'income' AND MONTH(date) = ? AND YEAR(date) = ?`,
+            [coa_code, month, year]
+        );
+        // 2. Ambil dari JournalEntry (Reklasifikasi DP/Termin lama saat pelunasan)
+        const [journalRows] = await db.query(
+            `SELECT COALESCE(SUM(je.credit), 0) as total FROM JournalEntry je
+             JOIN Journal j ON je.journalId = j.id
+             WHERE je.coa_code = ? AND j.type = 'revenue_recognition'
+             AND j.period_month = ? AND j.period_year = ?`,
+            [coa_code, month, year]
+        );
+        return Number(cashflowRows[0].total || 0) + Number(journalRows[0].total || 0);
+    };
+
     // PENDAPATAN
     const pendapatan = [
-        { code: '4100', name: coaMap['4100'] || 'Pendapatan Jasa Simulasi CFD', amount: await getCashflowByCoa('4100', 'income') },
-        { code: '4200', name: coaMap['4200'] || 'Pendapatan Jasa Simulasi FEA', amount: await getCashflowByCoa('4200', 'income') },
-        { code: '4300', name: coaMap['4300'] || 'Pendapatan Jasa Konsultasi & Training', amount: await getCashflowByCoa('4300', 'income') },
+        { code: '4100', name: coaMap['4100'] || 'Pendapatan Jasa Simulasi CFD', amount: await getPendapatanByCoa('4100') },
+        { code: '4200', name: coaMap['4200'] || 'Pendapatan Jasa Simulasi FEA', amount: await getPendapatanByCoa('4200') },
+        { code: '4300', name: coaMap['4300'] || 'Pendapatan Jasa Konsultasi & Training', amount: await getPendapatanByCoa('4300') },
     ];
     const totalPendapatan = pendapatan.reduce((s, p) => s + p.amount, 0);
 

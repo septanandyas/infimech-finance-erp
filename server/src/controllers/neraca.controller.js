@@ -129,14 +129,39 @@ const getNeracaByPeriod = async (month, year) => {
     // yang belum ditagih", bukan uang muka yang sudah diterima. Kalau
     // ditambahkan, sisa kontrak itu kehitung dobel: sekali sebagai Aset
     // (piutang), sekali lagi sebagai Kewajiban (unearned).
+    // Hitung Utang Pajak dari Cashflow (COA 2400 PPN & 2410 PPh)
+    const [utangPajak] = await db.query(
+        `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
+         WHERE coa_code IN ('2400', '2410') AND type = 'income'
+         AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
+        [year, year, month]
+    );
+    const totalUtangPajak = Number(utangPajak[0]?.total || 0);
+
+    // Hitung pendapatan yang sudah diakui (reklasifikasi 2200 -> 4100/4200/4300 via JournalEntry)
+    const [journalRecognized] = await db.query(
+        `SELECT COALESCE(SUM(je.debit), 0) as total FROM JournalEntry je
+         JOIN Journal j ON je.journalId = j.id
+         WHERE je.coa_code = '2200' AND j.type = 'revenue_recognition'
+         AND (j.period_year < ? OR (j.period_year = ? AND j.period_month <= ?))`,
+        [year, year, month]
+    );
+
     const totalPiutang = Math.max((Number(piutang[0].total) || 0) - (Number(sudahDibayar[0].total) || 0), 0);
-    const totalUnearned = Math.max((Number(unearned[0]?.total) || 0) - (Number(recognized[0]?.total) || 0), 0);
+    const totalRecognized = (Number(recognized[0]?.total) || 0) + (Number(journalRecognized[0]?.total) || 0);
+    const totalUnearned = Math.max((Number(unearned[0]?.total) || 0) - totalRecognized, 0);
     const ALL_LIABILITY_CATEGORIES = ['Hutang Bank', 'Hutang Usaha', 'Hutang Pajak', 'Hutang Gaji', 'Lainnya'];
 
-    const shortTermDetail = ALL_LIABILITY_CATEGORIES.map(category => ({
-        category,
-        total: Number(shortTerm.find(r => r.category === category)?.total || 0)
-    }));
+    const shortTermDetail = ALL_LIABILITY_CATEGORIES.map(category => {
+        let totalVal = Number(shortTerm.find(r => r.category === category)?.total || 0);
+        if (category === 'Hutang Pajak') {
+            totalVal += totalUtangPajak;
+        }
+        return {
+            category,
+            total: totalVal
+        };
+    });
     shortTermDetail.push({ category: 'Pendapatan Diterima di Muka', total: totalUnearned });
 
     const longTermDetail = ALL_LIABILITY_CATEGORIES.map(category => ({

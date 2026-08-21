@@ -76,9 +76,9 @@ export default function Kontrak() {
         } catch { toast.error('Gagal menghapus'); }
     };
 
-    const totalNilaiKontrak = data.filter(d => d.status === 'active').reduce((s, d) => s + Number(d.contract_value), 0);
-    const totalTerbayar = data.filter(d => d.status === 'active').reduce((s, d) => s + Number(d.total_paid || 0), 0);
-    const totalOutstanding = data.filter(d => d.status === 'active').reduce((s, d) => s + Number(d.outstanding || 0), 0);
+    const totalNilaiKontrak = data.filter(d => d.status !== 'cancelled').reduce((s, d) => s + Number(d.contract_value || 0), 0);
+    const totalTerbayar = data.filter(d => d.status !== 'cancelled').reduce((s, d) => s + Number(d.total_paid || 0), 0);
+    const totalOutstanding = data.filter(d => d.status !== 'cancelled').reduce((s, d) => s + Math.max(Number(d.outstanding || 0), 0), 0);
 
     return (
         <div className="space-y-6">
@@ -98,7 +98,7 @@ export default function Kontrak() {
             {/* Summary */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4">
-                    <p className="text-xs text-sky-600 font-bold uppercase tracking-wider mb-1">Total Nilai Kontrak Aktif</p>
+                    <p className="text-xs text-sky-600 font-bold uppercase tracking-wider mb-1">Total Nilai Kontrak</p>
                     <p className="text-2xl font-bold text-sky-600">{formatRupiah(totalNilaiKontrak)}</p>
                 </div>
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">

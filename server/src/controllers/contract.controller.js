@@ -28,16 +28,46 @@ c.contract_value - COALESCE(SUM(ip.amount / (1 + COALESCE(i.tax_rate, 0) / 100))
 };
 
 const createContract = async (req, res) => {
+    const conn = await db.getConnection();
     try {
         const { projectId, contract_number, contract_value, contract_date, status, notes, revenue_coa_code } = req.body;
-        const [result] = await db.query(
+        await conn.beginTransaction();
+
+        const [result] = await conn.query(
             `INSERT INTO ProjectContract (projectId, contract_number, contract_value, contract_date, revenue_coa_code, status, notes, createdBy, createdAt, updatedAt)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
             [projectId, contract_number || null, contract_value, contract_date, revenue_coa_code || '4100', status || 'active', notes || null, req.userId]
         );
-        res.json({ id: result.insertId, message: 'Contract created' });
+        const contractId = result.insertId;
+
+        // Catat Jurnal Pengakuan Piutang Kontrak Keseluruhan (Debit 1200 Piutang, Kredit 2200 Pendapatan Diterima di Muka)
+        const [journal] = await conn.query(
+            `INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+             VALUES (?, ?, ?, 'contract_creation', ?, ?, NOW())`,
+            [
+                contract_date,
+                `Pengakuan nilai kontrak - ${contract_number || contractId}`,
+                `CTR-${contractId}`,
+                new Date(contract_date).getMonth() + 1,
+                new Date(contract_date).getFullYear()
+            ]
+        );
+
+        await conn.query(
+            `INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit) VALUES ?`,
+            [[
+                [journal.insertId, '1200', `Piutang kontrak - ${contract_number || contractId}`, Number(contract_value), 0],
+                [journal.insertId, '2200', `Kewajiban kontrak - ${contract_number || contractId}`, 0, Number(contract_value)]
+            ]]
+        );
+
+        await conn.commit();
+        res.json({ id: contractId, message: 'Contract created' });
     } catch (error) {
+        await conn.rollback();
         res.status(500).json({ message: error.message });
+    } finally {
+        conn.release();
     }
 };
 
@@ -55,11 +85,31 @@ const updateContract = async (req, res) => {
 };
 
 const deleteContract = async (req, res) => {
+    const conn = await db.getConnection();
     try {
-        await db.query('DELETE FROM ProjectContract WHERE id = ?', [req.params.id]);
+        const contractId = req.params.id;
+        await conn.beginTransaction();
+
+        // Hapus Jurnal CTR-xxx terkait kontrak ini
+        const [ctrJournals] = await conn.query(
+            `SELECT id FROM Journal WHERE reference = ?`,
+            [`CTR-${contractId}`]
+        );
+        if (ctrJournals.length > 0) {
+            const ctrIds = ctrJournals.map(j => j.id);
+            const placeholders = ctrIds.map(() => '?').join(',');
+            await conn.query(`DELETE FROM JournalEntry WHERE journalId IN (${placeholders})`, ctrIds);
+            await conn.query(`DELETE FROM Journal WHERE id IN (${placeholders})`, ctrIds);
+        }
+
+        await conn.query('DELETE FROM ProjectContract WHERE id = ?', [contractId]);
+        await conn.commit();
         res.json({ message: 'Deleted' });
     } catch (error) {
+        await conn.rollback();
         res.status(500).json({ message: error.message });
+    } finally {
+        conn.release();
     }
 };
 

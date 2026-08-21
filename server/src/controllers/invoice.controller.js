@@ -163,11 +163,66 @@ const updateInvoiceStatus = async (req, res) => {
 };
 
 const deleteInvoice = async (req, res) => {
+    const conn = await db.getConnection();
     try {
-        await db.query('DELETE FROM Invoice WHERE id = ?', [req.params.id]);
-        res.json({ message: 'Deleted' });
+        const invoiceId = req.params.id;
+        await conn.beginTransaction();
+
+        // Ambil semua paymentId yang terikat dengan invoice ini
+        const [payments] = await conn.query('SELECT id FROM InvoicePayment WHERE invoiceId = ?', [invoiceId]);
+        
+        if (payments.length > 0) {
+            const paymentIds = payments.map(p => p.id);
+            const placeholders = paymentIds.map(() => '?').join(',');
+
+            // 1. Hapus Cashflow terkait
+            await conn.query(`DELETE FROM Cashflow WHERE paymentId IN (${placeholders})`, paymentIds);
+
+            // 2. Hapus Jurnal PY-xxx (pengurangan piutang) terkait
+            for (const pid of paymentIds) {
+                const [pyJournals] = await conn.query(`SELECT id FROM Journal WHERE reference = ?`, [`PY-${pid}`]);
+                if (pyJournals.length > 0) {
+                    const pyIds = pyJournals.map(j => j.id);
+                    const pyHolders = pyIds.map(() => '?').join(',');
+                    await conn.query(`DELETE FROM JournalEntry WHERE journalId IN (${pyHolders})`, pyIds);
+                    await conn.query(`DELETE FROM Journal WHERE id IN (${pyHolders})`, pyIds);
+                }
+            }
+
+            // 3. Hapus InvoicePayment
+            await conn.query(`DELETE FROM InvoicePayment WHERE invoiceId = ?`, [invoiceId]);
+        }
+
+        // Ambil data invoice untuk cek contractId & status pelunasan
+        const [invoices] = await conn.query('SELECT contractId FROM Invoice WHERE id = ?', [invoiceId]);
+        if (invoices.length > 0 && invoices[0].contractId) {
+            const contractId = invoices[0].contractId;
+            // Hapus Jurnal RR-xxx jika ada
+            const [reclassJournals] = await conn.query(
+                `SELECT id FROM Journal WHERE type = 'revenue_recognition' AND reference LIKE ?`,
+                [`RR-${contractId}-%`]
+            );
+            if (reclassJournals.length > 0) {
+                const rrIds = reclassJournals.map(j => j.id);
+                const rrHolders = rrIds.map(() => '?').join(',');
+                await conn.query(`DELETE FROM JournalEntry WHERE journalId IN (${rrHolders})`, rrIds);
+                await conn.query(`DELETE FROM Journal WHERE id IN (${rrHolders})`, rrIds);
+            }
+            // Kembalikan status kontrak ke active jika completed
+            await conn.query(`UPDATE ProjectContract SET status='active', updatedAt=NOW() WHERE id=? AND status='completed'`, [contractId]);
+        }
+
+        // Hapus InvoiceItem & Invoice
+        await conn.query('DELETE FROM InvoiceItem WHERE invoiceId = ?', [invoiceId]);
+        await conn.query('DELETE FROM Invoice WHERE id = ?', [invoiceId]);
+
+        await conn.commit();
+        res.json({ message: 'Invoice and associated payments/journals deleted' });
     } catch (error) {
+        await conn.rollback();
         res.status(500).json({ message: error.message });
+    } finally {
+        conn.release();
     }
 };
 
@@ -230,26 +285,36 @@ const addPayment = async (req, res) => {
         const taxAmount = Number(amount) - amountBeforeTax;
         console.log('tax_rate:', invoice.tax_rate, 'taxRate:', taxRate, 'amount:', amount, 'amountBeforeTax:', amountBeforeTax, 'taxAmount:', taxAmount);
 
-        // Catat kas masuk ke akun 2200 (nilai sebelum pajak SAJA)
+        // Tentukan COA Cashflow: DP & Termin -> 2200, Pelunasan -> 4100/4200/4300 sesuai kontrak
+        let paymentCoa = '2200';
+        let contractRevenueCoa = '4100';
+
+        if (invoice.contractId) {
+            const [contractRows] = await conn.query('SELECT revenue_coa_code FROM ProjectContract WHERE id = ?', [invoice.contractId]);
+            if (contractRows.length > 0 && contractRows[0].revenue_coa_code) {
+                contractRevenueCoa = contractRows[0].revenue_coa_code;
+            }
+        }
+
+        if (payment_type === 'pelunasan') {
+            paymentCoa = contractRevenueCoa;
+        }
+
         await conn.query(
             `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, paymentId, createdBy, createdAt, updatedAt)
-     VALUES ('income', ?, '2200', ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-            [categoryLabel, amountBeforeTax, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`, payment_date, invoice.projectId, newPaymentId, req.userId]
+     VALUES ('income', ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [categoryLabel, paymentCoa, amountBeforeTax, `Pembayaran ${payment_type.toUpperCase()} Invoice ${invoice.invoice_number}`, payment_date, invoice.projectId, newPaymentId, req.userId]
         );
 
-        // Catat pajak ke akun yang sesuai. PPh 23 non-final DAN PPN sama-sama
-        // uang yang benar-benar diterima penuh dari klien (klien transfer
-        // gross termasuk pajaknya), jadi sama-sama masuk Cashflow sebagai
-        // 'income' -- bedanya cuma akun liabilitasnya (2410 vs 2400).
-        // PPh Final saja yang beda karena itu benar-benar beban, bukan titipan.
+        // Catat pajak ke akun yang sesuai (PPh / PPN)
         if (taxAmount > 0) {
             const taxLabel = invoice.tax_label || 'PPN';
             const taxCoa = determineTaxCoa(taxLabel);
             const taxCat = determineTaxCategory(taxLabel);
             const isPphFinal = taxLabel.toLowerCase().includes('pph final');
             await conn.query(
-                `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, createdBy, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                `INSERT INTO Cashflow (type, category, coa_code, amount, description, date, projectId, paymentId, createdBy, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [
                     isPphFinal ? 'expense' : 'income',
                     taxCat,
@@ -258,52 +323,100 @@ const addPayment = async (req, res) => {
                     `${taxLabel} ${invoice.tax_rate}% Invoice ${invoice.invoice_number}`,
                     payment_date,
                     invoice.projectId,
+                    newPaymentId,
                     req.userId
                 ]
             );
         }
 
-        // Kalau lunas, recognize revenue: pindah 2200 -> 4100
+        // Catat Jurnal Pengurang Piutang di Buku Besar (Debit 2200, Kredit 1200 Piutang Usaha)
+        if (invoice.contractId) {
+            const [payJournal] = await conn.query(
+                `INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+                 VALUES (?, ?, ?, 'invoice_payment_clearing', ?, ?, NOW())`,
+                [
+                    payment_date,
+                    `Pengurangan piutang Invoice ${invoice.invoice_number}`,
+                    `PY-${newPaymentId}`,
+                    new Date(payment_date).getMonth() + 1,
+                    new Date(payment_date).getFullYear()
+                ]
+            );
+            await conn.query(
+                `INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit) VALUES ?`,
+                [[
+                    [payJournal.insertId, '2200', `Penyesuaian DP Invoice ${invoice.invoice_number}`, amountBeforeTax, 0],
+                    [payJournal.insertId, '1200', `Pengurangan piutang DP Invoice ${invoice.invoice_number}`, 0, amountBeforeTax]
+                ]]
+            );
+        }
+
+        // Kalau lunas, recognize revenue: Pindahkan akumulasi DP/Termin lama di 2200 ke COA Pendapatan Jasa
         if (newStatus === 'paid') {
             await conn.query(
                 'UPDATE Invoice SET recognition_date=?, updatedAt=NOW() WHERE id=?',
                 [payment_date, id]
             );
 
-            // Cek apakah semua invoice dalam kontrak sudah paid
             if (invoice.contractId) {
                 const [unpaidInvoices] = await conn.query(
                     `SELECT COUNT(*) as count FROM Invoice 
-             WHERE contractId = ? AND status != 'paid' AND id != ?`,
+                     WHERE contractId = ? AND status != 'paid' AND id != ?`,
                     [invoice.contractId, id]
                 );
-                // Ambil data kontrak dulu
+
                 const [contract] = await conn.query(
                     'SELECT * FROM ProjectContract WHERE id = ?',
                     [invoice.contractId]
                 );
 
                 if (contract.length > 0) {
-                    // Hitung total terbayar sebelum pajak untuk seluruh kontrak
                     const [paidSummary] = await conn.query(
                         `SELECT COALESCE(SUM(ip.amount / (1 + COALESCE(inv.tax_rate, 0) / 100)), 0) as total_paid
-         FROM InvoicePayment ip
-         JOIN Invoice inv ON ip.invoiceId = inv.id
-         WHERE inv.contractId = ?`,
+                         FROM InvoicePayment ip
+                         JOIN Invoice inv ON ip.invoiceId = inv.id
+                         WHERE inv.contractId = ?`,
                         [invoice.contractId]
                     );
                     const totalPaidBeforeTax = Number(paidSummary[0].total_paid);
                     const contractValue = Number(contract[0].contract_value);
                     const contractFullyPaid = unpaidInvoices[0].count === 0 && Math.abs(totalPaidBeforeTax - contractValue) < 1;
 
-                    if (contractFullyPaid) {
-                        // Reklasifikasi SEMUA kas masuk 2200 milik kontrak ini jadi 4100/4200/4300
-                        // HANYA saat kontrak benar-benar selesai — bukan per-invoice.
-                        await conn.query(
-                            `UPDATE Cashflow SET coa_code = ?, category = 'Pendapatan Jasa'
-                             WHERE coa_code = '2200' AND type = 'income' AND projectId = ?`,
-                            [contract[0].revenue_coa_code || '4100', invoice.projectId]
+                    if (contractFullyPaid && payment_type === 'pelunasan') {
+                        const revenueCoa = contract[0].revenue_coa_code || '4100';
+
+                        // Hitung berapa total DP/Termin lama yang ada di 2200 untuk kontrak ini (selain pelunasan saat ini)
+                        const [dpAccumulated] = await conn.query(
+                            `SELECT COALESCE(SUM(c.amount), 0) as total 
+                             FROM Cashflow c
+                             JOIN InvoicePayment ip ON c.paymentId = ip.id
+                             JOIN Invoice inv ON ip.invoiceId = inv.id
+                             WHERE inv.contractId = ? AND c.coa_code = '2200' AND c.paymentId != ?`,
+                            [invoice.contractId, newPaymentId]
                         );
+                        const previousDpAmount = Number(dpAccumulated[0].total);
+
+                        if (previousDpAmount > 0) {
+                            const [reclassJournal] = await conn.query(
+                                `INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+                                 VALUES (?, ?, ?, 'revenue_recognition', ?, ?, NOW())`,
+                                [
+                                    payment_date,
+                                    `Reklasifikasi DP/Termin ke Pendapatan - Kontrak ${contract[0].contract_number || invoice.contractId} lunas`,
+                                    `RR-${invoice.contractId}-${Date.now()}`,
+                                    new Date(payment_date).getMonth() + 1,
+                                    new Date(payment_date).getFullYear()
+                                ]
+                            );
+                            await conn.query(
+                                `INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit) VALUES ?`,
+                                [[
+                                    [reclassJournal.insertId, '2200', `Clear DP/Termin lama - Kontrak ${contract[0].contract_number || invoice.contractId}`, previousDpAmount, 0],
+                                    [reclassJournal.insertId, revenueCoa, `Pengakuan Pendapatan dari DP lama - Kontrak ${contract[0].contract_number || invoice.contractId}`, 0, previousDpAmount]
+                                ]]
+                            );
+                        }
+
                         await conn.query(
                             'UPDATE ProjectContract SET status=?, updatedAt=NOW() WHERE id=?',
                             ['completed', invoice.contractId]
@@ -440,6 +553,40 @@ const deletePayment = async (req, res) => {
         );
         // Hapus SEMUA cashflow terkait payment ini (baris kas 2200 DAN baris pajaknya)
         await conn.query(`DELETE FROM Cashflow WHERE paymentId = ?`, [paymentId]);
+
+        // Hapus Jurnal clearing piutang (PY-xxx) terkait payment ini
+        const [pyJournals] = await conn.query(
+            `SELECT id FROM Journal WHERE reference = ?`,
+            [`PY-${paymentId}`]
+        );
+        if (pyJournals.length > 0) {
+            const pyIds = pyJournals.map(j => j.id);
+            const placeholders = pyIds.map(() => '?').join(',');
+            await conn.query(`DELETE FROM JournalEntry WHERE journalId IN (${placeholders})`, pyIds);
+            await conn.query(`DELETE FROM Journal WHERE id IN (${placeholders})`, pyIds);
+        }
+
+        // Kalau ini adalah pembayaran pelunasan, hapus juga Journal reklasifikasi pendapatan
+        // (tipe 'revenue_recognition') yang terkait dengan kontrak invoice ini.
+        // Ini mencegah double-entry saat invoice pelunasan dibuat ulang.
+        if (payment.payment_type === 'pelunasan' && invoice.contractId) {
+            const [reclassJournals] = await conn.query(
+                `SELECT id FROM Journal WHERE type = 'revenue_recognition' AND reference LIKE ?`,
+                [`RR-${invoice.contractId}-%`]
+            );
+            if (reclassJournals.length > 0) {
+                const journalIds = reclassJournals.map(j => j.id);
+                const placeholders = journalIds.map(() => '?').join(',');
+                await conn.query(`DELETE FROM JournalEntry WHERE journalId IN (${placeholders})`, journalIds);
+                await conn.query(`DELETE FROM Journal WHERE id IN (${placeholders})`, journalIds);
+            }
+            // Kembalikan status kontrak ke 'active' jika sebelumnya 'completed'
+            await conn.query(
+                `UPDATE ProjectContract SET status='active', updatedAt=NOW() WHERE id=? AND status='completed'`,
+                [invoice.contractId]
+            );
+        }
+
         await conn.commit();
         res.json({ message: 'Payment deleted', newStatus, newPaidAmount });
     } catch (error) {
