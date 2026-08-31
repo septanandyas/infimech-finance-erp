@@ -13,10 +13,30 @@ export const AuthProvider = ({ children }) => {
         if (token) {
             axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             const savedUser = localStorage.getItem('finance_user');
-            if (savedUser) setUser(JSON.parse(savedUser));
+            if (savedUser) {
+                try {
+                    setUser(JSON.parse(savedUser));
+                } catch {
+                    logout();
+                }
+            }
         }
         setLoading(false);
     }, [token]);
+
+    // Interceptor jika token 401 (unauthorized) / 403 (forbidden / expired)
+    useEffect(() => {
+        const interceptor = axios.interceptors.response.use(
+            response => response,
+            error => {
+                if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+                    logout();
+                }
+                return Promise.reject(error);
+            }
+        );
+        return () => axios.interceptors.response.eject(interceptor);
+    }, []);
 
     const login = async (username, password) => {
         const res = await axios.post('/api/auth/login', { username, password });

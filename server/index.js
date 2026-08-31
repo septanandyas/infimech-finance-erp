@@ -3,7 +3,16 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-app.use(cors());
+app.use(cors({
+    origin: [
+        'https://infimech-finance-erp-client-583320051925.asia-southeast1.run.app',
+        'https://infimech-erp-client-583320051925.asia-southeast1.run.app',
+        'http://localhost:5173',
+        'http://localhost:3000'
+    ],
+    credentials: true
+}));
+app.options('*', cors());
 app.use(express.json());
 
 app.use('/api/auth', require('./src/routes/auth.routes'));

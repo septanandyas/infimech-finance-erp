@@ -27,14 +27,22 @@ const ProtectedRoute = ({ children }) => {
 };
 
 function AppRoutes() {
-    const { user } = useAuth();
+    const { user, loading } = useAuth();
+
+    if (loading) {
+        return <div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400 font-medium">Memuat aplikasi...</div>;
+    }
+
     if (!user) return (
         <Routes>
-            <Route path="*" element={<Login />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
     );
+
     return (
         <Routes>
+            <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
                 <Route index element={<Dashboard />} />
                 <Route path="cashflow" element={<Cashflow />} />
