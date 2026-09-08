@@ -1,22 +1,55 @@
 const db = require('../utils/db');
 const { autoInsertDepreciation } = require('./journal.controller');
+const { autoSyncPayrollJournals } = require('./payroll.controller');
 
 const getLabaRugiByPeriod = async (month, year) => {
-    // Auto-insert penyusutan
+    // Auto-sync payroll & auto-insert penyusutan
+    await autoSyncPayrollJournals();
     await autoInsertDepreciation(month, year);
 
     const [coaRows] = await db.query('SELECT code, name FROM ChartOfAccount');
     const coaMap = {};
     coaRows.forEach(c => { coaMap[c.code] = c.name; });
 
-    // Helper: ambil total cashflow per coa_code
-    const getCashflowByCoa = async (coa_code, type) => {
-        const [rows] = await db.query(
-            `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
-             WHERE coa_code = ? AND type = ? AND MONTH(date) = ? AND YEAR(date) = ?`,
-            [coa_code, type, month, year]
+    // Helper: ambil total cashflow per coa_code (termasuk fallback jika category sesuai tapi coa_code terisi Kas/kosong)
+    const getCashflowByCoa = async (coa_code, type, fallbackCategory = null) => {
+        let sql = `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
+                   WHERE (coa_code = ?`;
+        const params = [coa_code];
+        if (fallbackCategory) {
+            sql += ` OR (category = ? AND (coa_code IS NULL OR coa_code = '1100' OR coa_code = ''))`;
+            params.push(fallbackCategory);
+        }
+        sql += `) AND type = ? AND MONTH(date) = ? AND YEAR(date) = ?`;
+        params.push(type, month, year);
+
+        const [rows] = await db.query(sql, params);
+        return Number(rows[0]?.total) || 0;
+    };
+
+    // Helper: ambil total beban gaji (gabungan JournalEntry 5100 + Cashflow non-payroll)
+    const getBebanGaji = async () => {
+        // 1. Dari JournalEntry (termasuk Jurnal Payroll debit 5100 dan jurnal manual)
+        const [journalRows] = await db.query(
+            `SELECT COALESCE(SUM(je.debit) - SUM(je.credit), 0) as total
+             FROM JournalEntry je
+             JOIN Journal j ON je.journalId = j.id
+             WHERE je.coa_code = '5100' AND j.period_month = ? AND j.period_year = ?`,
+            [month, year]
         );
-        return Number(rows[0].total) || 0;
+        const journalTotal = Number(journalRows[0]?.total || 0);
+
+        // 2. Dari Cashflow manual/legacy (yang BUKAN dari payroll agar tidak dobel)
+        const [cashflowRows] = await db.query(
+            `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
+             WHERE (coa_code = '5100' OR (category = 'Gaji' AND (coa_code IS NULL OR coa_code = '1100' OR coa_code = '')))
+             AND (source != 'payroll' OR source IS NULL)
+             AND type = 'expense' AND MONTH(date) = ? AND YEAR(date) = ?`,
+            [month, year]
+        );
+        const cashflowTotal = Number(cashflowRows[0]?.total || 0);
+
+        return journalTotal + cashflowTotal;
     };
 
     // Helper: ambil total beban persediaan dari log
@@ -29,7 +62,7 @@ const getLabaRugiByPeriod = async (month, year) => {
              AND MONTH(l.log_date) = ? AND YEAR(l.log_date) = ?`,
             [month, year]
         );
-        return Number(rows[0].total) || 0;
+        return Number(rows[0]?.total) || 0;
     };
 
     // Helper: ambil total journal entry per coa_code
@@ -41,7 +74,7 @@ const getLabaRugiByPeriod = async (month, year) => {
              WHERE je.coa_code = ? AND j.period_month = ? AND j.period_year = ?`,
             [coa_code, month, year]
         );
-        return Number(rows[0].total) || 0;
+        return Number(rows[0]?.total) || 0;
     };
 
     // Helper: ambil total pendapatan per coa_code (gabungan Cashflow + JournalEntry reklasifikasi)
@@ -60,7 +93,7 @@ const getLabaRugiByPeriod = async (month, year) => {
              AND j.period_month = ? AND j.period_year = ?`,
             [coa_code, month, year]
         );
-        return Number(cashflowRows[0].total || 0) + Number(journalRows[0].total || 0);
+        return Number(cashflowRows[0]?.total || 0) + Number(journalRows[0]?.total || 0);
     };
 
     // PENDAPATAN
@@ -73,9 +106,9 @@ const getLabaRugiByPeriod = async (month, year) => {
 
     // HARGA POKOK JASA
     const hpp = [
-        { code: '5100', name: coaMap['5100'] || 'Gaji Karyawan (Engineer, Admin & Manajemen)', amount: await getCashflowByCoa('5100', 'expense') },
-        { code: '5200', name: coaMap['5200'] || 'Biaya Cloud / HPC', amount: await getCashflowByCoa('5200', 'expense') },
-        { code: '5300', name: coaMap['5300'] || 'Amortisasi Lisensi Software', amount: await getCashflowByCoa('5300', 'expense') },
+        { code: '5100', name: coaMap['5100'] || 'Gaji Karyawan (Engineer, Admin & Manajemen)', amount: await getBebanGaji() },
+        { code: '5200', name: coaMap['5200'] || 'Biaya Cloud / HPC', amount: await getCashflowByCoa('5200', 'expense', 'Cloud / HPC') },
+        { code: '5300', name: coaMap['5300'] || 'Amortisasi Lisensi Software', amount: await getCashflowByCoa('5300', 'expense', 'Software') },
     ];
     const totalHpp = hpp.reduce((s, h) => s + h.amount, 0);
     const labaKotor = totalPendapatan - totalHpp;
@@ -84,9 +117,9 @@ const getLabaRugiByPeriod = async (month, year) => {
     const beban = [
         { code: '5900', name: coaMap['5900'] || 'Beban Penyusutan Aset Tetap', amount: await getJournalByCoa('5900', 'debit') },
         { code: '6500', name: coaMap['6500'] || 'Beban Perlengkapan ATK', amount: await getBebanPersediaan() },
-        { code: '6200', name: coaMap['6200'] || 'Sewa Kantor & Utilitas', amount: await getCashflowByCoa('6200', 'expense') },
-        { code: '6300', name: coaMap['6300'] || 'Beban Pemasaran & Representasi', amount: await getCashflowByCoa('6300', 'expense') },
-        { code: '6400', name: coaMap['6400'] || 'Beban Pajak', amount: await getCashflowByCoa('6400', 'expense') },
+        { code: '6200', name: coaMap['6200'] || 'Sewa Kantor & Utilitas', amount: await getCashflowByCoa('6200', 'expense', 'Operasional') },
+        { code: '6300', name: coaMap['6300'] || 'Beban Pemasaran & Representasi', amount: await getCashflowByCoa('6300', 'expense', 'Marketing') },
+        { code: '6400', name: coaMap['6400'] || 'Beban Pajak', amount: await getCashflowByCoa('6400', 'expense', 'Pajak') },
     ];
     const totalBeban = beban.reduce((s, b) => s + b.amount, 0);
 

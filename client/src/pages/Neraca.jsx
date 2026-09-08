@@ -34,24 +34,45 @@ export default function Neraca() {
     const [year, setYear] = useState(now.getFullYear());
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
 
+    const fetchData = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await axios.get(`/api/neraca?month=${month}&year=${year}`);
+            setData(res.data);
+        } catch (err) {
+            console.error('Gagal fetch neraca:', err);
+            setError(err.response?.data?.message || err.message || 'Gagal memuat data neraca');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const res = await axios.get(`/api/neraca?month=${month}&year=${year}`);
-                setData(res.data);
-            } catch { console.error('Gagal fetch neraca'); }
-            finally { setLoading(false); }
-        };
         fetchData();
     }, [month, year]);
 
-    if (loading) return <div className="text-slate-500 text-center py-20">Loading...</div>;
-    if (!data) return <div className="text-slate-500 text-center py-20">Gagal memuat data</div>;
+    if (loading) return <div className="text-slate-500 text-center py-20 font-medium">Memuat data neraca...</div>;
+    if (error || !data) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="text-red-500 font-medium text-center">
+                    {error || 'Gagal memuat data'}
+                </div>
+                <button
+                    onClick={fetchData}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-sm font-semibold transition-colors"
+                >
+                    Coba Lagi
+                </button>
+            </div>
+        );
+    }
 
     const { current, previous } = data;
 
@@ -65,6 +86,10 @@ export default function Neraca() {
             ['Aset Lancar', '', '', ''],
             ['Kas & Setara Kas', current.aset.lancar.kas, previous.aset.lancar.kas, current.aset.lancar.kas - previous.aset.lancar.kas],
             ['Piutang Usaha', current.aset.lancar.piutang, previous.aset.lancar.piutang, current.aset.lancar.piutang - previous.aset.lancar.piutang],
+            ['Persediaan', current.aset.lancar.persediaan, previous.aset.lancar.persediaan, current.aset.lancar.persediaan - previous.aset.lancar.persediaan],
+            ...(current.aset.lancar.uang_muka_pph > 0 || previous.aset.lancar.uang_muka_pph > 0 ? [
+                ['Uang Muka PPh (1310)', current.aset.lancar.uang_muka_pph, previous.aset.lancar.uang_muka_pph, current.aset.lancar.uang_muka_pph - previous.aset.lancar.uang_muka_pph]
+            ] : []),
             ['Total Aset Lancar', current.aset.lancar.total, previous.aset.lancar.total, current.aset.lancar.total - previous.aset.lancar.total],
             ['Aset Tetap', '', '', ''],
             ...current.aset.tetap.categories.map(cat => [
@@ -103,23 +128,33 @@ export default function Neraca() {
         doc.setFontSize(11);
         doc.text(`Periode: ${MONTHS[month - 1]} ${year}`, 14, 23);
 
+        const bodyRows = [
+            ['ASET', '', '', ''],
+            ['Kas & Setara Kas', formatRupiah(current.aset.lancar.kas), formatRupiah(previous.aset.lancar.kas), formatRupiah(current.aset.lancar.kas - previous.aset.lancar.kas)],
+            ['Piutang Usaha', formatRupiah(current.aset.lancar.piutang), formatRupiah(previous.aset.lancar.piutang), formatRupiah(current.aset.lancar.piutang - previous.aset.lancar.piutang)],
+            ['Persediaan', formatRupiah(current.aset.lancar.persediaan), formatRupiah(previous.aset.lancar.persediaan), formatRupiah(current.aset.lancar.persediaan - previous.aset.lancar.persediaan)],
+        ];
+
+        if (current.aset.lancar.uang_muka_pph > 0 || previous.aset.lancar.uang_muka_pph > 0) {
+            bodyRows.push(['Uang Muka PPh (1310)', formatRupiah(current.aset.lancar.uang_muka_pph), formatRupiah(previous.aset.lancar.uang_muka_pph), formatRupiah(current.aset.lancar.uang_muka_pph - previous.aset.lancar.uang_muka_pph)]);
+        }
+
+        bodyRows.push(
+            ['Total Aset Lancar', formatRupiah(current.aset.lancar.total), formatRupiah(previous.aset.lancar.total), formatRupiah(current.aset.lancar.total - previous.aset.lancar.total)],
+            ['Total Aset Tetap', formatRupiah(current.aset.tetap.total), formatRupiah(previous.aset.tetap.total), formatRupiah(current.aset.tetap.total - previous.aset.tetap.total)],
+            ['TOTAL ASET', formatRupiah(current.aset.total), formatRupiah(previous.aset.total), formatRupiah(current.aset.total - previous.aset.total)],
+            ['KEWAJIBAN', '', '', ''],
+            ['Total Jangka Pendek', formatRupiah(current.kewajiban.jangka_pendek.total), formatRupiah(previous.kewajiban.jangka_pendek.total), formatRupiah(current.kewajiban.jangka_pendek.total - previous.kewajiban.jangka_pendek.total)],
+            ['Total Jangka Panjang', formatRupiah(current.kewajiban.jangka_panjang.total), formatRupiah(previous.kewajiban.jangka_panjang.total), formatRupiah(current.kewajiban.jangka_panjang.total - previous.kewajiban.jangka_panjang.total)],
+            ['TOTAL KEWAJIBAN', formatRupiah(current.kewajiban.total), formatRupiah(previous.kewajiban.total), formatRupiah(current.kewajiban.total - previous.kewajiban.total)],
+            ['MODAL', '', '', ''],
+            ['Modal Bersih', formatRupiah(current.modal.total), formatRupiah(previous.modal.total), formatRupiah(current.modal.total - previous.modal.total)],
+        );
+
         autoTable(doc, {
             startY: 30,
             head: [['Keterangan', `${MONTHS[month - 1]} ${year}`, `${MONTHS[prevMonth - 1]} ${prevYear}`, 'Selisih']],
-            body: [
-                ['ASET', '', '', ''],
-                ['Kas & Setara Kas', formatRupiah(current.aset.lancar.kas), formatRupiah(previous.aset.lancar.kas), formatRupiah(current.aset.lancar.kas - previous.aset.lancar.kas)],
-                ['Piutang Usaha', formatRupiah(current.aset.lancar.piutang), formatRupiah(previous.aset.lancar.piutang), formatRupiah(current.aset.lancar.piutang - previous.aset.lancar.piutang)],
-                ['Total Aset Lancar', formatRupiah(current.aset.lancar.total), formatRupiah(previous.aset.lancar.total), formatRupiah(current.aset.lancar.total - previous.aset.lancar.total)],
-                ['Total Aset Tetap', formatRupiah(current.aset.tetap.total), formatRupiah(previous.aset.tetap.total), formatRupiah(current.aset.tetap.total - previous.aset.tetap.total)],
-                ['TOTAL ASET', formatRupiah(current.aset.total), formatRupiah(previous.aset.total), formatRupiah(current.aset.total - previous.aset.total)],
-                ['KEWAJIBAN', '', '', ''],
-                ['Total Jangka Pendek', formatRupiah(current.kewajiban.jangka_pendek.total), formatRupiah(previous.kewajiban.jangka_pendek.total), formatRupiah(current.kewajiban.jangka_pendek.total - previous.kewajiban.jangka_pendek.total)],
-                ['Total Jangka Panjang', formatRupiah(current.kewajiban.jangka_panjang.total), formatRupiah(previous.kewajiban.jangka_panjang.total), formatRupiah(current.kewajiban.jangka_panjang.total - previous.kewajiban.jangka_panjang.total)],
-                ['TOTAL KEWAJIBAN', formatRupiah(current.kewajiban.total), formatRupiah(previous.kewajiban.total), formatRupiah(current.kewajiban.total - previous.kewajiban.total)],
-                ['MODAL', '', '', ''],
-                ['Modal Bersih', formatRupiah(current.modal.total), formatRupiah(previous.modal.total), formatRupiah(current.modal.total - previous.modal.total)],
-            ],
+            body: bodyRows,
             styles: { fontSize: 9 },
             headStyles: { fillColor: [14, 165, 233] },
             didParseCell: (data) => {
@@ -215,6 +250,9 @@ export default function Neraca() {
                         <NeracaRow label="Kas & Setara Kas" current={current.aset.lancar.kas} previous={previous.aset.lancar.kas} indent />
                         <NeracaRow label="Piutang Usaha" current={current.aset.lancar.piutang} previous={previous.aset.lancar.piutang} indent />
                         <NeracaRow label="Persediaan" current={current.aset.lancar.persediaan} previous={previous.aset.lancar.persediaan} indent />
+                        {(current.aset.lancar.uang_muka_pph > 0 || previous.aset.lancar.uang_muka_pph > 0) && (
+                            <NeracaRow label="Uang Muka PPh (1310)" current={current.aset.lancar.uang_muka_pph} previous={previous.aset.lancar.uang_muka_pph} indent />
+                        )}
                         <NeracaRow label="Total Aset Lancar" current={current.aset.lancar.total} previous={previous.aset.lancar.total} bold />
 
                         <tr className="bg-slate-50/50">

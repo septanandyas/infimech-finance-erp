@@ -12,30 +12,51 @@ export default function PerubahanModal() {
     const [neraca, setNeraca] = useState(null);
     const [labaRugi, setLabaRugi] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const fetchData = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const [neracaRes, lrRes] = await Promise.all([
+                axios.get(`/api/neraca?month=${month}&year=${year}`),
+                axios.get(`/api/labarugi?month=${month}&year=${year}`),
+            ]);
+            setNeraca(neracaRes.data);
+            setLabaRugi(lrRes.data);
+        } catch (err) {
+            console.error('Gagal fetch data perubahan modal:', err);
+            setError(err.response?.data?.message || err.message || 'Gagal memuat data perubahan modal');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const [neracaRes, lrRes] = await Promise.all([
-                    axios.get(`/api/neraca?month=${month}&year=${year}`),
-                    axios.get(`/api/labarugi?month=${month}&year=${year}`),
-                ]);
-                setNeraca(neracaRes.data);
-                setLabaRugi(lrRes.data);
-            } catch { console.error('Gagal fetch data perubahan modal'); }
-            finally { setLoading(false); }
-        };
         fetchData();
     }, [month, year]);
 
-    if (loading) return <div className="text-slate-500 text-center py-20">Loading...</div>;
-    if (!neraca || !labaRugi) return <div className="text-slate-500 text-center py-20">Gagal memuat data</div>;
+    if (loading) return <div className="text-slate-500 text-center py-20 font-medium">Memuat data perubahan modal...</div>;
+    if (error || !neraca || !labaRugi) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="text-red-500 font-medium text-center">
+                    {error || 'Gagal memuat data'}
+                </div>
+                <button
+                    onClick={fetchData}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-sm font-semibold transition-colors"
+                >
+                    Coba Lagi
+                </button>
+            </div>
+        );
+    }
 
-    const modalAwal = Number(neraca.previous.modal.total) || 0;
-    const labaRugiBerjalan = Number(labaRugi.current.labaRugiBersih) || 0;
+    const modalAwal = Number(neraca?.previous?.modal?.total) || 0;
+    const labaRugiBerjalan = Number(labaRugi?.current?.labaRugiBersih) || 0;
     const modalAkhirHitung = modalAwal + labaRugiBerjalan;
-    const modalAkhirNeraca = Number(neraca.current.modal.total) || 0;
+    const modalAkhirNeraca = Number(neraca?.current?.modal?.total) || 0;
     const selisih = modalAkhirNeraca - modalAkhirHitung;
     const isProfit = labaRugiBerjalan >= 0;
 

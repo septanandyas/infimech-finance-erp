@@ -1,4 +1,5 @@
 const db = require('../utils/db');
+const { autoSyncPayrollJournals } = require('./payroll.controller');
 
 const autoInsertDepreciation = async (month, year) => {
     const conn = await db.getConnection();
@@ -88,7 +89,8 @@ const getJournals = async (req, res) => {
         const { month, year } = req.query;
         const rows = [];
 
-        // Auto-insert penyusutan kalau belum ada
+        // Auto-sync payroll journals & depreciation kalau belum ada
+        await autoSyncPayrollJournals();
         if (month && year) {
             await autoInsertDepreciation(parseInt(month), parseInt(year));
         }
