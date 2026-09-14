@@ -57,6 +57,7 @@ function AppRoutes() {
                 <Route path="inventory" element={<Inventory />} />
                 <Route path="laba-rugi" element={<LabaRugi />} />
                 <Route path="perubahan-modal" element={<PerubahanModal />} />
+
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
         </Routes>

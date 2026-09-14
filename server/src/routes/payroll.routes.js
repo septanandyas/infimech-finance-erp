@@ -7,7 +7,8 @@ const {
     getEmployees,
     createPayroll,
     updatePayroll,
-    deletePayroll
+    deletePayroll,
+    settlePayroll
 } = require('../controllers/payroll.controller');
 
 router.use(verifyToken);
@@ -19,5 +20,8 @@ router.get('/:id', getPayrollById);
 router.post('/', createPayroll);
 router.put('/:id', updatePayroll);
 router.delete('/:id', deletePayroll);
+
+// Lunasi utang gaji ke karyawan (ubah status → Dibayar, buat jurnal pelunasan)
+router.post('/:id/settle', settlePayroll);
 
 module.exports = router;

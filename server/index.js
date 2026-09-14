@@ -7,8 +7,12 @@ app.use(cors({
     origin: [
         'https://infimech-finance-erp-client-583320051925.asia-southeast1.run.app',
         'https://infimech-erp-client-583320051925.asia-southeast1.run.app',
+        // HRD module — tambahkan URL production HRD di sini saat deploy
+        // 'https://infimech-hrd-XXXXX.asia-southeast1.run.app',
         'http://localhost:5173',
-        'http://localhost:3000'
+        'http://localhost:5174',  // HRD dev (port berbeda)
+        'http://localhost:3000',
+        'http://localhost:3001',  // HRD dev alternatif
     ],
     credentials: true
 }));

@@ -153,6 +153,18 @@ const getNeracaByPeriod = async (month, year) => {
 
     const totalUtangPajak = Number(utangPajakCashflow[0]?.total || 0) + Number(utangPph21Journal[0]?.total || 0);
 
+    // Hitung Utang Gaji (COA 2600) dari JournalEntry
+    // Kredit 2600 = pengakuan utang gaji; Debit 2600 = pelunasan ke karyawan
+    // Saldo = kredit - debit (positif = masih ada utang gaji)
+    const [utangGajiJournal] = await db.query(
+        `SELECT COALESCE(SUM(je.credit) - SUM(je.debit), 0) as total
+         FROM JournalEntry je JOIN Journal j ON je.journalId = j.id
+         WHERE je.coa_code = '2600'
+         AND (j.period_year < ? OR (j.period_year = ? AND j.period_month <= ?))`,
+        [year, year, month]
+    );
+    const totalUtangGaji = Math.max(0, Number(utangGajiJournal[0]?.total || 0));
+
     // Hitung pendapatan yang sudah diakui (reklasifikasi 2200 -> 4100/4200/4300 via JournalEntry)
     const [journalRecognized] = await db.query(
         `SELECT COALESCE(SUM(je.debit), 0) as total FROM JournalEntry je
@@ -176,6 +188,27 @@ const getNeracaByPeriod = async (month, year) => {
             total: totalVal
         };
     });
+
+    // Sisipkan Utang Gaji (2600) setelah Hutang Gaji dari Liability table,
+    // atau tampilkan sebagai item tersendiri dengan label yang jelas
+    const utangGajiIdx = shortTermDetail.findIndex(c => c.category === 'Hutang Gaji');
+    if (utangGajiIdx >= 0) {
+        // Gabungkan dengan entri Hutang Gaji dari tabel Liability (jika ada)
+        shortTermDetail[utangGajiIdx].total += totalUtangGaji;
+    } else {
+        // Tampilkan sebagai baris tersendiri
+        shortTermDetail.push({ category: 'Utang Gaji', total: totalUtangGaji });
+    }
+
+    // Tambahkan Utang PPh 21 sebagai baris tersendiri (hanya jika ada saldo)
+    const utangPph21Saldo = Math.max(0, Number(utangPph21Journal[0]?.total || 0));
+    if (utangPph21Saldo > 0) {
+        const pph21Idx = shortTermDetail.findIndex(c => c.category === 'Utang PPh 21');
+        if (pph21Idx < 0) {
+            shortTermDetail.push({ category: 'Utang PPh 21', total: utangPph21Saldo });
+        }
+    }
+
     shortTermDetail.push({ category: 'Pendapatan Diterima di Muka', total: totalUnearned });
 
     const longTermDetail = ALL_LIABILITY_CATEGORIES.map(category => ({

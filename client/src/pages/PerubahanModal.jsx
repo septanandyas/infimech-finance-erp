@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { formatRupiah } from '../lib/utils';
 import { cn } from '../lib/utils';
+import { Info } from 'lucide-react';
 
 const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -53,12 +54,12 @@ export default function PerubahanModal() {
         );
     }
 
-    const modalAwal = Number(neraca?.previous?.modal?.total) || 0;
-    const labaRugiBerjalan = Number(labaRugi?.current?.labaRugiBersih) || 0;
-    const modalAkhirHitung = modalAwal + labaRugiBerjalan;
-    const modalAkhirNeraca = Number(neraca?.current?.modal?.total) || 0;
-    const selisih = modalAkhirNeraca - modalAkhirHitung;
-    const isProfit = labaRugiBerjalan >= 0;
+    const modalAwal          = Number(neraca?.previous?.modal?.total) || 0;
+    const labaRugiBerjalan   = Number(labaRugi?.current?.labaRugiBersih) || 0;
+    const modalAkhirHitung   = modalAwal + labaRugiBerjalan;
+    const modalAkhirNeraca   = Number(neraca?.current?.modal?.total) || 0;
+    const selisih            = modalAkhirNeraca - modalAkhirHitung;
+    const isProfit           = labaRugiBerjalan >= 0;
 
     return (
         <div className="space-y-6">
@@ -129,11 +130,22 @@ export default function PerubahanModal() {
                 </table>
             </div>
 
+            {/* Catatan selisih akrual — hanya tampil jika ada */}
             {Math.abs(selisih) > 1 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
-                    ⚠ Ada selisih {formatRupiah(Math.abs(selisih))} antara Modal Akhir hasil perhitungan (Modal Awal + Laba/Rugi Berjalan)
-                    dengan Modal Akhir dari Neraca (Total Aset − Total Kewajiban) periode ini. Kemungkinan ada transaksi yang
-                    memengaruhi neraca tapi tidak melalui Cashflow/Jurnal L-R periode berjalan — perlu dicek lebih lanjut.
+                <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex gap-3 text-sm">
+                    <Info size={16} className="flex-shrink-0 mt-0.5 text-sky-500" />
+                    <div className="space-y-1">
+                        <p className="font-bold text-sky-800">
+                            Catatan: Ada penyesuaian akrual sebesar {formatRupiah(Math.abs(selisih))}.
+                        </p>
+                        <p className="text-xs text-sky-600 leading-relaxed">
+                            Ini wajar dalam sistem akuntansi basis akrual. Selisih ini mencerminkan nilai
+                            <strong> Utang Gaji (akun 2600)</strong> yang sudah diakui sebagai beban di Laba Rugi
+                            tetapi belum dilunasi secara tunai. Modal Akhir versi Neraca (Aset − Kewajiban) adalah{' '}
+                            <strong>{formatRupiah(modalAkhirNeraca)}</strong>.
+                            Selisih akan hilang setelah Utang Gaji dilunasi melalui halaman <em>Utang Gaji</em>.
+                        </p>
+                    </div>
                 </div>
             )}
         </div>

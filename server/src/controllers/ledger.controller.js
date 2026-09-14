@@ -32,8 +32,7 @@ const getLedgerEntries = async (req, res) => {
         const { month, year } = req.query;
         const rows = [];
 
-        // Auto-sync payroll journals & auto-insert penyusutan
-        await autoSyncPayrollJournals();
+        // Penyusutan tetap di-insert jika belum ada (ringan, tidak iterasi semua payroll)
         if (month && year) {
             await autoInsertDepreciation(parseInt(month), parseInt(year));
         }

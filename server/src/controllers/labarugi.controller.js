@@ -1,10 +1,8 @@
 const db = require('../utils/db');
 const { autoInsertDepreciation } = require('./journal.controller');
-const { autoSyncPayrollJournals } = require('./payroll.controller');
+
 
 const getLabaRugiByPeriod = async (month, year) => {
-    // Auto-sync payroll & auto-insert penyusutan
-    await autoSyncPayrollJournals();
     await autoInsertDepreciation(month, year);
 
     const [coaRows] = await db.query('SELECT code, name FROM ChartOfAccount');
@@ -27,9 +25,9 @@ const getLabaRugiByPeriod = async (month, year) => {
         return Number(rows[0]?.total) || 0;
     };
 
-    // Helper: ambil total beban gaji (gabungan JournalEntry 5100 + Cashflow non-payroll)
+    // Helper: ambil total beban gaji dari JournalEntry coa_code '5100' + Cashflow legacy
     const getBebanGaji = async () => {
-        // 1. Dari JournalEntry (termasuk Jurnal Payroll debit 5100 dan jurnal manual)
+        // 1. Dari JournalEntry (payroll_accrual + jurnal manual)
         const [journalRows] = await db.query(
             `SELECT COALESCE(SUM(je.debit) - SUM(je.credit), 0) as total
              FROM JournalEntry je
@@ -39,7 +37,8 @@ const getLabaRugiByPeriod = async (month, year) => {
         );
         const journalTotal = Number(journalRows[0]?.total || 0);
 
-        // 2. Dari Cashflow manual/legacy (yang BUKAN dari payroll agar tidak dobel)
+        // 2. Dari Cashflow non-payroll (input manual / legacy pra-migrasi)
+        //    source='payroll' di-exclude agar tidak dobel dengan JournalEntry accrual
         const [cashflowRows] = await db.query(
             `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
              WHERE (coa_code = '5100' OR (category = 'Gaji' AND (coa_code IS NULL OR coa_code = '1100' OR coa_code = '')))
@@ -122,6 +121,8 @@ const getLabaRugiByPeriod = async (month, year) => {
         { code: '6400', name: coaMap['6400'] || 'Beban Pajak', amount: await getCashflowByCoa('6400', 'expense', 'Pajak') },
     ];
     const totalBeban = beban.reduce((s, b) => s + b.amount, 0);
+
+
 
     // PENDAPATAN/BEBAN LAIN-LAIN (non-operasional, contoh: untung/rugi pelepasan aset tetap)
     const lainLain = [

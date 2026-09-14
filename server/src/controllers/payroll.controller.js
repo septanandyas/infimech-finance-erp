@@ -21,7 +21,37 @@ const getMonthName = (monthNum) => {
 };
 
 /**
- * Helper to generate or update journal & cashflow for a single payroll record
+ * Helper: hitung komponen gaji dari baris payroll
+ */
+const calcPayrollComponents = (p) => {
+    const gajiPokok = Number(p.gaji_pokok || 0);
+    const tunjangan = Number(p.tunjangan || 0);
+    const bonus = Number(p.bonus || 0);
+    const potongan = Number(p.potongan || 0);
+    const pph21 = p.pph21_type === 'custom' ? Number(p.pph21 || 0) : 0;
+    const bebanGaji = Math.max(0, gajiPokok + tunjangan + bonus - potongan); // gaji kotor
+    const takeHomePay = Math.max(0, bebanGaji - pph21);                      // take home pay
+    return { bebanGaji, takeHomePay, pph21 };
+};
+
+/**
+ * Sinkronisasi jurnal untuk satu payroll record.
+ *
+ * Alur 3 jurnal:
+ * ─────────────────────────────────────────────────────────
+ * Jurnal 1 — Pengakuan (selalu dibuat, berapapun statusnya):
+ *   Debit  5100  Gaji Karyawan      = bebanGaji
+ *   Kredit 2600  Utang Gaji         = takeHomePay
+ *   Kredit 2300  Utang PPh 21       = pph21  (jika > 0)
+ *
+ * Jurnal 2 — Pelunasan ke karyawan (hanya saat Dibayar):
+ *   Debit  2600  Utang Gaji         = takeHomePay
+ *   Kredit 1100  Kas                = takeHomePay
+ *
+ * Jurnal 3 — Setor PPh 21 (hanya saat Dibayar DAN pph21 > 0):
+ *   Debit  2300  Utang PPh 21       = pph21
+ *   Kredit 1100  Kas                = pph21
+ * ─────────────────────────────────────────────────────────
  */
 const syncJournalForPayroll = async (conn, payrollId) => {
     const [rows] = await conn.query(`
@@ -34,162 +64,298 @@ const syncJournalForPayroll = async (conn, payrollId) => {
     if (!rows || rows.length === 0) return null;
     const p = rows[0];
 
-    const isPaid = ['Dibayar', 'Sudah Dibayar'].includes(p.status_pembayaran);
-    if (!isPaid) {
-        // If not paid, remove existing journal & cashflow if any
-        if (p.journal_id) {
-            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [p.journal_id]);
-            await conn.query('DELETE FROM Journal WHERE id = ?', [p.journal_id]);
-        }
-        if (p.cashflow_id) {
-            await conn.query('DELETE FROM Cashflow WHERE id = ?', [p.cashflow_id]);
-        }
-        await conn.query('UPDATE payroll SET journal_id = NULL, cashflow_id = NULL WHERE id = ?', [payrollId]);
-        return null;
-    }
+    const { bebanGaji, takeHomePay, pph21 } = calcPayrollComponents(p);
 
     const monthNum = parseMonthNumber(p.bulan);
     const monthStr = getMonthName(monthNum);
     const yearNum = Number(p.tahun) || new Date().getFullYear();
     const empName = p.nama_karyawan || 'Karyawan';
 
-    const gajiPokok = Number(p.gaji_pokok || 0);
-    const tunjangan = Number(p.tunjangan || 0);
-    const bonus = Number(p.bonus || 0);
-    const potongan = Number(p.potongan || 0);
-    const pph21 = p.pph21_type === 'custom' ? Number(p.pph21 || 0) : 0;
-
-    const bebanGaji = Math.max(0, gajiPokok + tunjangan + bonus - potongan);
-    const gajiBersih = Math.max(0, bebanGaji - pph21);
-
     const payDate = p.tanggal_dibayar
         ? (p.tanggal_dibayar.toISOString?.()?.slice(0, 10) || p.tanggal_dibayar)
         : `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
 
-    const ref = `PAY-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
-    const desc = `Beban Gaji - ${empName} (${monthStr} ${yearNum})`;
+    const refAccrual  = `PAY-ACR-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
+    const refPayment  = `PAY-PAY-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
+    const refPph21    = `PAY-PPH-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
+    const descAccrual = `Pengakuan Beban Gaji - ${empName} (${monthStr} ${yearNum})`;
+    const descPayment = `Pelunasan Utang Gaji - ${empName} (${monthStr} ${yearNum})`;
+    const descPph21   = `Setor PPh 21 - ${empName} (${monthStr} ${yearNum})`;
 
-    // 1. Manage Journal
-    let journalId = p.journal_id;
-    if (!journalId) {
-        const [byRef] = await conn.query(
-            `SELECT id FROM Journal WHERE reference = ? AND type = 'payroll'`,
-            [ref]
-        );
-        if (byRef.length > 0) {
-            journalId = byRef[0].id;
-        }
-    }
+    const isPaid = ['Dibayar', 'Sudah Dibayar'].includes(p.status_pembayaran);
 
-    if (journalId) {
-        const [jExists] = await conn.query('SELECT id FROM Journal WHERE id = ?', [journalId]);
+    // ─── JURNAL 1: Pengakuan (selalu) ───────────────────────────────────────
+    let accrualJournalId = p.journal_id;
+
+    if (accrualJournalId) {
+        const [jExists] = await conn.query('SELECT id FROM Journal WHERE id = ?', [accrualJournalId]);
         if (jExists.length > 0) {
             await conn.query(`
                 UPDATE Journal
-                SET journal_date = ?, description = ?, reference = ?, type = 'payroll', period_month = ?, period_year = ?
+                SET journal_date = ?, description = ?, reference = ?, type = 'payroll_accrual',
+                    period_month = ?, period_year = ?
                 WHERE id = ?
-            `, [payDate, desc, ref, monthNum, yearNum, journalId]);
-            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [journalId]);
+            `, [payDate, descAccrual, refAccrual, monthNum, yearNum, accrualJournalId]);
+            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [accrualJournalId]);
         } else {
-            journalId = null;
+            accrualJournalId = null;
         }
     }
 
-    if (!journalId) {
-        const [jRes] = await conn.query(`
-            INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
-            VALUES (?, ?, ?, 'payroll', ?, ?, NOW())
-        `, [payDate, desc, ref, monthNum, yearNum]);
-        journalId = jRes.insertId;
+    if (!accrualJournalId) {
+        // Coba cari by reference dulu
+        const [byRef] = await conn.query(
+            `SELECT id FROM Journal WHERE reference = ? AND type = 'payroll_accrual'`,
+            [refAccrual]
+        );
+        if (byRef.length > 0) {
+            accrualJournalId = byRef[0].id;
+            await conn.query(`
+                UPDATE Journal
+                SET journal_date = ?, description = ?, period_month = ?, period_year = ?
+                WHERE id = ?
+            `, [payDate, descAccrual, monthNum, yearNum, accrualJournalId]);
+            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [accrualJournalId]);
+        } else {
+            const [jRes] = await conn.query(`
+                INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+                VALUES (?, ?, ?, 'payroll_accrual', ?, ?, NOW())
+            `, [payDate, descAccrual, refAccrual, monthNum, yearNum]);
+            accrualJournalId = jRes.insertId;
+        }
     }
 
-    // Insert JournalEntry rows (Balanced double-entry)
-    // Line 1: Debit 5100 Gaji Karyawan (Beban / HPP)
+    // Insert entries jurnal pengakuan
     await conn.query(`
         INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
         VALUES (?, '5100', ?, ?, 0)
-    `, [journalId, desc, bebanGaji]);
+    `, [accrualJournalId, descAccrual, bebanGaji]);
 
-    // Line 2: Credit 1100 Kas (Gaji Bersih)
     await conn.query(`
         INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
-        VALUES (?, '1100', ?, 0, ?)
-    `, [journalId, `Kas Keluar Gaji - ${empName}`, gajiBersih]);
+        VALUES (?, '2600', ?, 0, ?)
+    `, [accrualJournalId, `Utang Gaji - ${empName}`, takeHomePay]);
 
-    // Line 3: Credit 2300 Utang PPh 21 (Nominal PPh 21) if any
     if (pph21 > 0) {
         await conn.query(`
             INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
             VALUES (?, '2300', ?, 0, ?)
-        `, [journalId, `Utang PPh 21 - ${empName}`, pph21]);
+        `, [accrualJournalId, `Utang PPh 21 - ${empName}`, pph21]);
     }
 
-    // 2. Manage Cashflow (for cash tracking in Cashflow module)
-    let cashflowId = p.cashflow_id;
-    if (!cashflowId) {
-        const [byDesc] = await conn.query(
-            `SELECT id FROM Cashflow WHERE source = 'payroll' AND description = ? AND date = ?`,
-            [`Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate]
-        );
-        if (byDesc.length > 0) {
-            cashflowId = byDesc[0].id;
+    // ─── JURNAL 2 & 3: Pelunasan (hanya saat Dibayar) ───────────────────────
+    let paymentJournalId = p.payment_journal_id || null;
+    let pph21JournalId   = p.pph21_journal_id   || null;
+
+    if (isPaid) {
+        // -- Jurnal 2: Pelunasan ke karyawan
+        if (paymentJournalId) {
+            const [jExists] = await conn.query('SELECT id FROM Journal WHERE id = ?', [paymentJournalId]);
+            if (jExists.length > 0) {
+                await conn.query(`
+                    UPDATE Journal
+                    SET journal_date = ?, description = ?, reference = ?, type = 'payroll_payment',
+                        period_month = ?, period_year = ?
+                    WHERE id = ?
+                `, [payDate, descPayment, refPayment, monthNum, yearNum, paymentJournalId]);
+                await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [paymentJournalId]);
+            } else {
+                paymentJournalId = null;
+            }
         }
-    }
 
-    if (cashflowId) {
-        const [cfExists] = await conn.query('SELECT id FROM Cashflow WHERE id = ?', [cashflowId]);
-        if (cfExists.length > 0) {
+        if (!paymentJournalId) {
+            const [byRef] = await conn.query(
+                `SELECT id FROM Journal WHERE reference = ? AND type = 'payroll_payment'`,
+                [refPayment]
+            );
+            if (byRef.length > 0) {
+                paymentJournalId = byRef[0].id;
+                await conn.query(`
+                    UPDATE Journal
+                    SET journal_date = ?, description = ?, period_month = ?, period_year = ?
+                    WHERE id = ?
+                `, [payDate, descPayment, monthNum, yearNum, paymentJournalId]);
+                await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [paymentJournalId]);
+            } else {
+                const [jRes] = await conn.query(`
+                    INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+                    VALUES (?, ?, ?, 'payroll_payment', ?, ?, NOW())
+                `, [payDate, descPayment, refPayment, monthNum, yearNum]);
+                paymentJournalId = jRes.insertId;
+            }
+        }
+
+        await conn.query(`
+            INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
+            VALUES (?, '2600', ?, ?, 0)
+        `, [paymentJournalId, `Pelunasan Utang Gaji - ${empName}`, takeHomePay]);
+
+        await conn.query(`
+            INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
+            VALUES (?, '1100', ?, 0, ?)
+        `, [paymentJournalId, `Kas Keluar Gaji - ${empName}`, takeHomePay]);
+
+        // -- Jurnal 3: Setor PPh 21
+        if (pph21 > 0) {
+            if (pph21JournalId) {
+                const [jExists] = await conn.query('SELECT id FROM Journal WHERE id = ?', [pph21JournalId]);
+                if (jExists.length > 0) {
+                    await conn.query(`
+                        UPDATE Journal
+                        SET journal_date = ?, description = ?, reference = ?, type = 'payroll_pph21',
+                            period_month = ?, period_year = ?
+                        WHERE id = ?
+                    `, [payDate, descPph21, refPph21, monthNum, yearNum, pph21JournalId]);
+                    await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
+                } else {
+                    pph21JournalId = null;
+                }
+            }
+
+            if (!pph21JournalId) {
+                const [byRef] = await conn.query(
+                    `SELECT id FROM Journal WHERE reference = ? AND type = 'payroll_pph21'`,
+                    [refPph21]
+                );
+                if (byRef.length > 0) {
+                    pph21JournalId = byRef[0].id;
+                    await conn.query(`
+                        UPDATE Journal
+                        SET journal_date = ?, description = ?, period_month = ?, period_year = ?
+                        WHERE id = ?
+                    `, [payDate, descPph21, monthNum, yearNum, pph21JournalId]);
+                    await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
+                } else {
+                    const [jRes] = await conn.query(`
+                        INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
+                        VALUES (?, ?, ?, 'payroll_pph21', ?, ?, NOW())
+                    `, [payDate, descPph21, refPph21, monthNum, yearNum]);
+                    pph21JournalId = jRes.insertId;
+                }
+            }
+
             await conn.query(`
-                UPDATE Cashflow
-                SET type = 'expense', category = 'Gaji', amount = ?, description = ?, date = ?, coa_code = '1100', source = 'payroll', updatedAt = NOW()
-                WHERE id = ?
-            `, [gajiBersih, `Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate, cashflowId]);
+                INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
+                VALUES (?, '2300', ?, ?, 0)
+            `, [pph21JournalId, `Setor PPh 21 - ${empName}`, pph21]);
+
+            await conn.query(`
+                INSERT INTO JournalEntry (journalId, coa_code, description, debit, credit)
+                VALUES (?, '1100', ?, 0, ?)
+            `, [pph21JournalId, `Kas Keluar PPh 21 - ${empName}`, pph21]);
         } else {
-            cashflowId = null;
+            // Tidak ada PPh 21 — hapus jurnal PPh 21 lama jika ada
+            if (pph21JournalId) {
+                await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
+                await conn.query('DELETE FROM Journal WHERE id = ?', [pph21JournalId]);
+                pph21JournalId = null;
+            }
         }
+
+        // Cashflow untuk tracking kas keluar (kas sisi 1100)
+        const gajiBersih = takeHomePay;
+        let cashflowId = p.cashflow_id || null;
+
+        if (!cashflowId) {
+            const [byDesc] = await conn.query(
+                `SELECT id FROM Cashflow WHERE source = 'payroll' AND description = ? AND date = ?`,
+                [`Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate]
+            );
+            if (byDesc.length > 0) cashflowId = byDesc[0].id;
+        }
+
+        if (cashflowId) {
+            const [cfExists] = await conn.query('SELECT id FROM Cashflow WHERE id = ?', [cashflowId]);
+            if (cfExists.length > 0) {
+                await conn.query(`
+                    UPDATE Cashflow
+                    SET type = 'expense', category = 'Gaji', amount = ?, description = ?, date = ?,
+                        coa_code = '1100', source = 'payroll', updatedAt = NOW()
+                    WHERE id = ?
+                `, [gajiBersih, `Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate, cashflowId]);
+            } else {
+                cashflowId = null;
+            }
+        }
+
+        if (!cashflowId) {
+            const [cfRes] = await conn.query(`
+                INSERT INTO Cashflow (type, category, amount, description, date, coa_code, source, createdBy, createdAt, updatedAt)
+                VALUES ('expense', 'Gaji', ?, ?, ?, '1100', 'payroll', 2, NOW(), NOW())
+            `, [gajiBersih, `Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate]);
+            cashflowId = cfRes.insertId;
+        }
+
+        // Update referensi di payroll
+        await conn.query(`
+            UPDATE payroll
+            SET journal_id = ?, payment_journal_id = ?, pph21_journal_id = ?, cashflow_id = ?, total_gaji = ?
+            WHERE id = ?
+        `, [accrualJournalId, paymentJournalId, pph21JournalId || null, cashflowId, takeHomePay, payrollId]);
+
+    } else {
+        // Belum Dibayar — hapus jurnal pelunasan & PPh 21 jika ada (sisa dari update status)
+        if (paymentJournalId) {
+            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [paymentJournalId]);
+            await conn.query('DELETE FROM Journal WHERE id = ?', [paymentJournalId]);
+            paymentJournalId = null;
+        }
+        if (pph21JournalId) {
+            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
+            await conn.query('DELETE FROM Journal WHERE id = ?', [pph21JournalId]);
+            pph21JournalId = null;
+        }
+        if (p.cashflow_id) {
+            await conn.query('DELETE FROM Cashflow WHERE id = ?', [p.cashflow_id]);
+        }
+
+        await conn.query(`
+            UPDATE payroll
+            SET journal_id = ?, payment_journal_id = NULL, pph21_journal_id = NULL,
+                cashflow_id = NULL, total_gaji = ?
+            WHERE id = ?
+        `, [accrualJournalId, takeHomePay, payrollId]);
     }
 
-    if (!cashflowId) {
-        const [cfRes] = await conn.query(`
-            INSERT INTO Cashflow (type, category, amount, description, date, coa_code, source, createdBy, createdAt, updatedAt)
-            VALUES ('expense', 'Gaji', ?, ?, ?, '1100', 'payroll', 2, NOW(), NOW())
-        `, [gajiBersih, `Pembayaran Gaji - ${empName} (${monthStr} ${yearNum})`, payDate]);
-        cashflowId = cfRes.insertId;
-    }
-
-    // 3. Update payroll reference
-    await conn.query(`
-        UPDATE payroll
-        SET journal_id = ?, cashflow_id = ?, total_gaji = ?
-        WHERE id = ?
-    `, [journalId, cashflowId, gajiBersih, payrollId]);
-
-    return { journalId, cashflowId, bebanGaji, gajiBersih, pph21 };
+    return { accrualJournalId, paymentJournalId, pph21JournalId, bebanGaji, takeHomePay, pph21 };
 };
 
 /**
- * Auto-sync missing or unaligned journals for all paid payroll slips
+ * Cooldown-based guard untuk autoSyncPayrollJournals.
+ * Hanya berjalan jika belum dijalankan dalam SYNC_COOLDOWN_MS terakhir.
+ * Ini mencegah re-sync mahal pada setiap request Buku Besar / Neraca / LabaRugi.
+ * Jurnal tetap konsisten karena createPayroll/updatePayroll/settlePayroll
+ * selalu memanggil syncJournalForPayroll secara langsung.
  */
+const SYNC_COOLDOWN_MS = 30_000; // 30 detik
+let _lastSyncTime = 0;
+let _isSyncing = false;
+
 const autoSyncPayrollJournals = async () => {
+    const now = Date.now();
+    if (_isSyncing) return;                          // sedang berjalan
+    if (now - _lastSyncTime < SYNC_COOLDOWN_MS) return; // masih dalam cooldown
+
+    _isSyncing = true;
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const [allPaid] = await conn.query(`
-            SELECT id FROM payroll
-            WHERE status_pembayaran IN ('Dibayar', 'Sudah Dibayar')
-        `);
-
-        for (const row of allPaid) {
+        const [allPayrolls] = await conn.query(`SELECT id FROM payroll`);
+        for (const row of allPayrolls) {
             await syncJournalForPayroll(conn, row.id);
         }
         await conn.commit();
+        _lastSyncTime = Date.now(); // update waktu sync terakhir hanya jika berhasil
     } catch (err) {
         await conn.rollback();
         console.error('autoSyncPayrollJournals error:', err);
     } finally {
         conn.release();
+        _isSyncing = false;
     }
 };
+
 
 const getPayrolls = async (req, res) => {
     try {
@@ -239,18 +405,12 @@ const getPayrolls = async (req, res) => {
         const [rows] = await db.query(sql, params);
 
         const mapped = rows.map(r => {
-            const gajiPokok = Number(r.gaji_pokok || 0);
-            const tunjangan = Number(r.tunjangan || 0);
-            const bonus = Number(r.bonus || 0);
-            const potongan = Number(r.potongan || 0);
-            const pph21 = r.pph21_type === 'custom' ? Number(r.pph21 || 0) : 0;
-            const gajiKotor = gajiPokok + tunjangan + bonus - potongan;
-            const gajiBersih = gajiKotor - pph21;
-
+            const { bebanGaji, takeHomePay, pph21 } = calcPayrollComponents(r);
             return {
                 ...r,
-                gaji_kotor: gajiKotor,
-                gaji_bersih: gajiBersih,
+                gaji_kotor: bebanGaji,
+                gaji_bersih: takeHomePay,
+                pph21_amount: pph21,
                 bulan_nama: getMonthName(parseMonthNumber(r.bulan))
             };
         });
@@ -284,31 +444,28 @@ const getPayrollById = async (req, res) => {
         }
 
         const r = rows[0];
-        const gajiPokok = Number(r.gaji_pokok || 0);
-        const tunjangan = Number(r.tunjangan || 0);
-        const bonus = Number(r.bonus || 0);
-        const potongan = Number(r.potongan || 0);
-        const pph21 = r.pph21_type === 'custom' ? Number(r.pph21 || 0) : 0;
-        const gajiKotor = gajiPokok + tunjangan + bonus - potongan;
-        const gajiBersih = gajiKotor - pph21;
+        const { bebanGaji, takeHomePay, pph21 } = calcPayrollComponents(r);
 
-        // Fetch journal entries if available
+        // Ambil semua jurnal terkait (pengakuan, pelunasan, PPh 21)
+        const journalIds = [r.journal_id, r.payment_journal_id, r.pph21_journal_id].filter(Boolean);
         let entries = [];
-        if (r.journal_id) {
+        if (journalIds.length > 0) {
             const [jeRows] = await db.query(`
-                SELECT je.*, coa.name as coa_name
+                SELECT je.*, coa.name as coa_name, j.type as journal_type, j.reference as journal_reference
                 FROM JournalEntry je
                 LEFT JOIN ChartOfAccount coa ON je.coa_code = coa.code
-                WHERE je.journalId = ?
-                ORDER BY je.id ASC
-            `, [r.journal_id]);
+                LEFT JOIN Journal j ON je.journalId = j.id
+                WHERE je.journalId IN (${journalIds.map(() => '?').join(',')})
+                ORDER BY je.journalId ASC, je.id ASC
+            `, journalIds);
             entries = jeRows;
         }
 
         res.json({
             ...r,
-            gaji_kotor: gajiKotor,
-            gaji_bersih: gajiBersih,
+            gaji_kotor: bebanGaji,
+            gaji_bersih: takeHomePay,
+            pph21_amount: pph21,
             bulan_nama: getMonthName(parseMonthNumber(r.bulan)),
             journal_entries: entries
         });
@@ -344,7 +501,7 @@ const createPayroll = async (req, res) => {
             tunjangan,
             bonus,
             potongan,
-            status_pembayaran = 'Sudah Dibayar',
+            status_pembayaran = 'Belum Dibayar',
             pph21_type = 'tanpa_pajak',
             pph21_rate = 0,
             pph21 = 0,
@@ -370,12 +527,11 @@ const createPayroll = async (req, res) => {
         const numPph21Rate = Number(pph21_rate || 0);
 
         const bebanGaji = Math.max(0, numGajiPokok + numTunjangan + numBonus - numPotongan);
-        const gajiBersih = Math.max(0, bebanGaji - numPph21);
+        const takeHomePay = Math.max(0, bebanGaji - numPph21);
 
         const payDate = tanggal_dibayar || new Date().toISOString().slice(0, 10);
         const status = ['Sudah Dibayar', 'Dibayar'].includes(status_pembayaran) ? 'Dibayar' : status_pembayaran;
 
-        // Insert into payroll table
         const [result] = await conn.query(`
             INSERT INTO payroll (
                 karyawan_id, bulan, tahun, gaji_pokok, tunjangan, bonus, potongan,
@@ -384,12 +540,10 @@ const createPayroll = async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)
         `, [
             karyawan_id, monthStr, yearNum, numGajiPokok, numTunjangan, numBonus, numPotongan,
-            gajiBersih, status, numPph21, pph21_type, numPph21Rate, payDate, catatan || null
+            takeHomePay, status, numPph21, pph21_type, numPph21Rate, payDate, catatan || null
         ]);
 
         const newPayrollId = result.insertId;
-
-        // Generate journal & cashflow
         const syncResult = await syncJournalForPayroll(conn, newPayrollId);
 
         await conn.commit();
@@ -422,7 +576,7 @@ const updatePayroll = async (req, res) => {
             tunjangan,
             bonus,
             potongan,
-            status_pembayaran = 'Sudah Dibayar',
+            status_pembayaran = 'Belum Dibayar',
             pph21_type = 'tanpa_pajak',
             pph21_rate = 0,
             pph21 = 0,
@@ -442,7 +596,7 @@ const updatePayroll = async (req, res) => {
         const numPph21Rate = Number(pph21_rate || 0);
 
         const bebanGaji = Math.max(0, numGajiPokok + numTunjangan + numBonus - numPotongan);
-        const gajiBersih = Math.max(0, bebanGaji - numPph21);
+        const takeHomePay = Math.max(0, bebanGaji - numPph21);
 
         const payDate = tanggal_dibayar || new Date().toISOString().slice(0, 10);
         const status = ['Sudah Dibayar', 'Dibayar'].includes(status_pembayaran) ? 'Dibayar' : status_pembayaran;
@@ -455,7 +609,7 @@ const updatePayroll = async (req, res) => {
             WHERE id = ?
         `, [
             karyawan_id, monthStr, yearNum, numGajiPokok, numTunjangan,
-            numBonus, numPotongan, gajiBersih, status,
+            numBonus, numPotongan, takeHomePay, status,
             numPph21, pph21_type, numPph21Rate, payDate, catatan || null, id
         ]);
 
@@ -479,18 +633,22 @@ const deletePayroll = async (req, res) => {
         await conn.beginTransaction();
         const { id } = req.params;
 
-        const [rows] = await conn.query('SELECT journal_id, cashflow_id FROM payroll WHERE id = ?', [id]);
+        const [rows] = await conn.query(
+            'SELECT journal_id, payment_journal_id, pph21_journal_id, cashflow_id FROM payroll WHERE id = ?',
+            [id]
+        );
         if (rows.length === 0) {
             await conn.rollback();
             conn.release();
             return res.status(404).json({ message: 'Slip gaji tidak ditemukan' });
         }
 
-        const { journal_id, cashflow_id } = rows[0];
+        const { journal_id, payment_journal_id, pph21_journal_id, cashflow_id } = rows[0];
 
-        if (journal_id) {
-            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [journal_id]);
-            await conn.query('DELETE FROM Journal WHERE id = ?', [journal_id]);
+        // Hapus semua jurnal terkait
+        for (const jId of [journal_id, payment_journal_id, pph21_journal_id].filter(Boolean)) {
+            await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [jId]);
+            await conn.query('DELETE FROM Journal WHERE id = ?', [jId]);
         }
 
         if (cashflow_id) {
@@ -502,11 +660,54 @@ const deletePayroll = async (req, res) => {
         await conn.commit();
         conn.release();
 
-        res.json({ message: 'Slip gaji dan jurnal terkait berhasil dihapus' });
+        res.json({ message: 'Slip gaji dan semua jurnal terkait berhasil dihapus' });
     } catch (error) {
         await conn.rollback();
         conn.release();
         console.error('deletePayroll error:', error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * Tandai payroll sebagai Dibayar (ubah status → Dibayar, buat jurnal pelunasan & cashflow)
+ * POST /api/payroll/:id/settle
+ */
+const settlePayroll = async (req, res) => {
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+        const { id } = req.params;
+        const { tanggal_dibayar } = req.body;
+
+        const [rows] = await conn.query('SELECT * FROM payroll WHERE id = ?', [id]);
+        if (rows.length === 0) {
+            await conn.rollback(); conn.release();
+            return res.status(404).json({ message: 'Slip gaji tidak ditemukan' });
+        }
+        const p = rows[0];
+        if (['Dibayar', 'Sudah Dibayar'].includes(p.status_pembayaran)) {
+            await conn.rollback(); conn.release();
+            return res.status(400).json({ message: 'Gaji sudah dilunasi sebelumnya' });
+        }
+
+        const payDate = tanggal_dibayar || new Date().toISOString().slice(0, 10);
+
+        await conn.query(
+            `UPDATE payroll SET status_pembayaran = 'Dibayar', tanggal_dibayar = ? WHERE id = ?`,
+            [payDate, id]
+        );
+
+        await syncJournalForPayroll(conn, id);
+
+        await conn.commit();
+        conn.release();
+
+        res.json({ message: 'Gaji berhasil dilunasi dan jurnal pelunasan dibuat' });
+    } catch (error) {
+        await conn.rollback();
+        conn.release();
+        console.error('settlePayroll error:', error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -518,6 +719,7 @@ module.exports = {
     createPayroll,
     updatePayroll,
     deletePayroll,
+    settlePayroll,
     autoSyncPayrollJournals,
     syncJournalForPayroll
 };
