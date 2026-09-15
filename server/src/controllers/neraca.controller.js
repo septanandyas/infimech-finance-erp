@@ -20,14 +20,15 @@ const getNeracaByPeriod = async (month, year) => {
     );
 
     const lastDayOfMonth = new Date(year, month, 0).getDate();
+    const endOfMonthStr = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
     const endOfMonthDate = new Date(year, month - 1, lastDayOfMonth, 23, 59, 59);
 
     const [piutang] = await db.query(
         `SELECT COALESCE(SUM(contract_value), 0) as total 
      FROM ProjectContract 
      WHERE status = 'active'
-     AND contract_date <= ?`,
-        [endOfMonthDate]
+     AND DATE(contract_date) <= ?`,
+        [endOfMonthStr]
     );
     const [sudahDibayar] = await db.query(
         `SELECT COALESCE(SUM(ip.amount / (1 + COALESCE(i.tax_rate, 0) / 100)), 0) as total 
@@ -36,13 +37,13 @@ const getNeracaByPeriod = async (month, year) => {
      JOIN ProjectContract c ON i.contractId = c.id
      WHERE i.status IN ('acc','partial','paid')
      AND c.status = 'active'
-     AND ip.payment_date <= ?`,
-        [endOfMonthDate]
+     AND DATE(ip.payment_date) <= ?`,
+        [endOfMonthStr]
     );
     // Hitung nilai persediaan PADA AKHIR PERIODE yang diminta (bukan saldo live),
     // direkonstruksi dari riwayat InventoryLog agar Neraca bulan lalu tidak
     // ikut memuat pembelian yang terjadi di bulan berjalan.
-    const inventoryEndDate = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+    const inventoryEndDate = endOfMonthStr;
     const [inventory] = await db.query(
         `SELECT COALESCE(SUM(
             CASE WHEN l.type = 'in' THEN l.quantity ELSE -l.quantity END * i.unit_price

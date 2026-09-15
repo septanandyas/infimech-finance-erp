@@ -6,6 +6,7 @@ const app = express();
 app.use(cors({
     origin: [
         'https://infimech-finance-erp-client-583320051925.asia-southeast1.run.app',
+        'https://infimech-finance-client-583320051925.asia-southeast1.run.app',
         'https://infimech-erp-client-583320051925.asia-southeast1.run.app',
         // HRD module — tambahkan URL production HRD di sini saat deploy
         // 'https://infimech-hrd-XXXXX.asia-southeast1.run.app',
