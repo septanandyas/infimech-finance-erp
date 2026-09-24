@@ -36,6 +36,7 @@ app.use('/api/ledger', require('./src/routes/ledger.routes'));
 app.use('/api/coa', require('./src/routes/coa.routes'));
 app.use('/api/inventory', require('./src/routes/inventory.routes'));
 app.use('/api/payroll', require('./src/routes/payroll.routes'));
+app.use('/api/notes', require('./src/routes/notes.routes'));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => console.log(`Finance ERP running on port ${PORT}`));
