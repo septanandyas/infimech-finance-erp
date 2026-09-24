@@ -18,6 +18,7 @@ import UnearnedRevenue from './pages/UnearnedRevenue';
 import BukuBesar from './pages/BukuBesar';
 import CoA from './pages/CoA';
 import Inventory from './pages/Inventory';
+import Notes from './pages/Notes';
 
 const ProtectedRoute = ({ children }) => {
     const { user, loading } = useAuth();
@@ -57,6 +58,7 @@ function AppRoutes() {
                 <Route path="inventory" element={<Inventory />} />
                 <Route path="laba-rugi" element={<LabaRugi />} />
                 <Route path="perubahan-modal" element={<PerubahanModal />} />
+                <Route path="catatan" element={<Notes />} />
 
             </Route>
             <Route path="*" element={<Navigate to="/" />} />
@@ -69,7 +71,17 @@ export default function App() {
         <AuthProvider>
             <BrowserRouter>
                 <AppRoutes />
-                <ToastContainer theme="dark" position="top-right" />
+                <ToastContainer
+                    position="top-right"
+                    autoClose={2500}
+                    hideProgressBar={false}
+                    newestOnTop
+                    closeOnClick
+                    pauseOnHover
+                    theme="light"
+                    toastClassName="!rounded-xl !shadow-lg !border !border-slate-200 !text-sm !font-medium"
+                    bodyClassName="!text-slate-700"
+                />
             </BrowserRouter>
         </AuthProvider>
     );

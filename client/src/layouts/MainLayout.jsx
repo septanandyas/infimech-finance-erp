@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
     LayoutDashboard, TrendingUp, FileText, Package, Building2,
     AlertCircle, ReceiptText, BookOpen, LogOut, Menu, X,
-    ChevronDown, ArrowLeftRight, Layers, BarChart3, ScrollText, Landmark
+    ChevronDown, ArrowLeftRight, Layers, BarChart3, ScrollText, Landmark, StickyNote
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -58,6 +58,12 @@ const navGroups = [
         icon: BookOpen,
         label: 'Chart of Accounts',
         path: '/coa',
+    },
+    {
+        type: 'single',
+        icon: StickyNote,
+        label: 'Catatan',
+        path: '/catatan',
     },
 ];
 
