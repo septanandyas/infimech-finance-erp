@@ -136,14 +136,14 @@ export default function PerubahanModal() {
                     <Info size={16} className="flex-shrink-0 mt-0.5 text-sky-500" />
                     <div className="space-y-1">
                         <p className="font-bold text-sky-800">
-                            Catatan: Ada penyesuaian akrual sebesar {formatRupiah(Math.abs(selisih))}.
+                            Catatan: Ada selisih akrual sebesar {formatRupiah(Math.abs(selisih))}.
                         </p>
                         <p className="text-xs text-sky-600 leading-relaxed">
-                            Ini wajar dalam sistem akuntansi basis akrual. Selisih ini mencerminkan nilai
-                            <strong> Utang Gaji (akun 2600)</strong> yang sudah diakui sebagai beban di Laba Rugi
+                            Ini wajar dalam sistem akuntansi basis akrual. Selisih terjadi karena ada kewajiban
+                            (seperti utang gaji, utang pajak, dll) yang sudah diakui sebagai beban di Laba Rugi
                             tetapi belum dilunasi secara tunai. Modal Akhir versi Neraca (Aset − Kewajiban) adalah{' '}
                             <strong>{formatRupiah(modalAkhirNeraca)}</strong>.
-                            Selisih akan hilang setelah Utang Gaji dilunasi melalui halaman <em>Utang Gaji</em>.
+                            Selisih akan hilang setelah semua kewajiban tersebut dilunasi.
                         </p>
                     </div>
                 </div>

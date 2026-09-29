@@ -37,26 +37,32 @@ const getLedgerEntries = async (req, res) => {
             await autoInsertDepreciation(parseInt(month), parseInt(year));
         }
 
+        // Sync jurnal payroll dari HRD agar slip gaji baru langsung muncul di Buku Besar
+        await autoSyncPayrollJournals();
+
         // Fetch COA untuk mapping
         const [coaRows] = await db.query('SELECT code, name FROM ChartOfAccount');
         const coaMap = {};
         coaRows.forEach(c => { coaMap[c.code] = `[${c.code}] ${c.name}`; });
 
         const [cashflowRows] = await db.query(`
-            SELECT id, type, category, amount, description, date, coa_code
+            SELECT id, type, category, amount, description, date, coa_code, source
             FROM Cashflow
+            WHERE YEAR(date) = ? AND MONTH(date) = ?
             ORDER BY date ASC, id ASC
-        `);
+        `, [year || new Date().getFullYear(), month || new Date().getMonth() + 1]);
 
-        // COA yang entry-nya sudah SEPENUHNYA dicatat di JournalEntry (LP-xxx / LB-xxx):
-        // - 2100 Hutang Usaha: cicilan hutang sudah ada via Journal LP-xxx (Debit 2100, Kredit 1100)
+        // COA yang entry-nya sudah SEPENUHNYA dicatat di JournalEntry:
+        // - 2100 Hutang Usaha: cicilan hutang sudah ada via Journal
         // - 1100 Kas: jangan buat "Kas pada Kas"
-        // Cashflow dengan COA ini cukup untuk data cashflow, tapi SKIP di ledger.
+        // - source='payroll': sudah ada di payroll_accrual/payment/pph21 Journal
         const SKIP_IN_LEDGER = new Set(['2100', '1100']);
 
         cashflowRows.forEach((item) => {
             const entryDate = formatDate(item.date);
-            if (!filterByMonthYear(entryDate, month, year)) return;
+
+            // Skip cashflow payroll — sudah tercatat di JournalEntry (payroll_accrual, payroll_payment, payroll_pph21)
+            if (item.source === 'payroll') return;
 
             const bebanAkun = item.coa_code && coaMap[item.coa_code]
                 ? coaMap[item.coa_code]

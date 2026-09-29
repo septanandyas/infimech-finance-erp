@@ -28,7 +28,9 @@ const calcPayrollComponents = (p) => {
     const tunjangan = Number(p.tunjangan || 0);
     const bonus = Number(p.bonus || 0);
     const potongan = Number(p.potongan || 0);
-    const pph21 = p.pph21_type === 'custom' ? Number(p.pph21 || 0) : 0;
+    // Hitung pph21 untuk semua tipe KECUALI 'tanpa_pajak'
+    // (HRD dapat menyimpan pph21_type sebagai 'otomatis', 'manual', atau 'custom')
+    const pph21 = (p.pph21_type && p.pph21_type !== 'tanpa_pajak') ? Number(p.pph21 || 0) : 0;
     const bebanGaji = Math.max(0, gajiPokok + tunjangan + bonus - potongan); // gaji kotor
     const takeHomePay = Math.max(0, bebanGaji - pph21);                      // take home pay
     return { bebanGaji, takeHomePay, pph21 };
@@ -71,9 +73,16 @@ const syncJournalForPayroll = async (conn, payrollId) => {
     const yearNum = Number(p.tahun) || new Date().getFullYear();
     const empName = p.nama_karyawan || 'Karyawan';
 
+    // Tanggal PENGAKUAN = akhir bulan periode gaji (standar akuntansi)
+    // Juli 2026 → 2026-07-31, September 2026 → 2026-09-30
+    const lastDay = new Date(yearNum, monthNum, 0).getDate();
+    const accrualDate = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    // Tanggal PEMBAYARAN = tanggal aktual saat dibayar (dari input HRD)
     const payDate = p.tanggal_dibayar
-        ? (p.tanggal_dibayar.toISOString?.()?.slice(0, 10) || p.tanggal_dibayar)
-        : `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
+        ? (p.tanggal_dibayar.toISOString?.()?.slice(0, 10) || String(p.tanggal_dibayar).slice(0, 10))
+        : new Date().toISOString().slice(0, 10);
+
 
     const refAccrual  = `PAY-ACR-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
     const refPayment  = `PAY-PAY-${yearNum}${String(monthNum).padStart(2, '0')}-${String(p.id).padStart(3, '0')}`;
@@ -84,7 +93,13 @@ const syncJournalForPayroll = async (conn, payrollId) => {
 
     const isPaid = ['Dibayar', 'Sudah Dibayar'].includes(p.status_pembayaran);
 
-    // ─── JURNAL 1: Pengakuan (selalu) ───────────────────────────────────────
+    // period bulan/tahun PEMBAYARAN (untuk jurnal pelunasan & PPh21)
+    // Jurnal pelunasan harus muncul di bulan saat dibayar, bukan bulan periode gaji
+    const payDateObj  = new Date(payDate);
+    const payMonthNum = payDateObj.getMonth() + 1;
+    const payYearNum  = payDateObj.getFullYear();
+
+
     let accrualJournalId = p.journal_id;
 
     if (accrualJournalId) {
@@ -95,7 +110,7 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                 SET journal_date = ?, description = ?, reference = ?, type = 'payroll_accrual',
                     period_month = ?, period_year = ?
                 WHERE id = ?
-            `, [payDate, descAccrual, refAccrual, monthNum, yearNum, accrualJournalId]);
+            `, [accrualDate, descAccrual, refAccrual, monthNum, yearNum, accrualJournalId]);
             await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [accrualJournalId]);
         } else {
             accrualJournalId = null;
@@ -114,13 +129,13 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                 UPDATE Journal
                 SET journal_date = ?, description = ?, period_month = ?, period_year = ?
                 WHERE id = ?
-            `, [payDate, descAccrual, monthNum, yearNum, accrualJournalId]);
+            `, [accrualDate, descAccrual, monthNum, yearNum, accrualJournalId]);
             await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [accrualJournalId]);
         } else {
             const [jRes] = await conn.query(`
                 INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
                 VALUES (?, ?, ?, 'payroll_accrual', ?, ?, NOW())
-            `, [payDate, descAccrual, refAccrual, monthNum, yearNum]);
+            `, [accrualDate, descAccrual, refAccrual, monthNum, yearNum]);
             accrualJournalId = jRes.insertId;
         }
     }
@@ -157,7 +172,7 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                     SET journal_date = ?, description = ?, reference = ?, type = 'payroll_payment',
                         period_month = ?, period_year = ?
                     WHERE id = ?
-                `, [payDate, descPayment, refPayment, monthNum, yearNum, paymentJournalId]);
+                `, [payDate, descPayment, refPayment, payMonthNum, payYearNum, paymentJournalId]);
                 await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [paymentJournalId]);
             } else {
                 paymentJournalId = null;
@@ -175,13 +190,13 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                     UPDATE Journal
                     SET journal_date = ?, description = ?, period_month = ?, period_year = ?
                     WHERE id = ?
-                `, [payDate, descPayment, monthNum, yearNum, paymentJournalId]);
+                `, [payDate, descPayment, payMonthNum, payYearNum, paymentJournalId]);
                 await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [paymentJournalId]);
             } else {
                 const [jRes] = await conn.query(`
                     INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
                     VALUES (?, ?, ?, 'payroll_payment', ?, ?, NOW())
-                `, [payDate, descPayment, refPayment, monthNum, yearNum]);
+                `, [payDate, descPayment, refPayment, payMonthNum, payYearNum]);
                 paymentJournalId = jRes.insertId;
             }
         }
@@ -206,7 +221,7 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                         SET journal_date = ?, description = ?, reference = ?, type = 'payroll_pph21',
                             period_month = ?, period_year = ?
                         WHERE id = ?
-                    `, [payDate, descPph21, refPph21, monthNum, yearNum, pph21JournalId]);
+                    `, [payDate, descPph21, refPph21, payMonthNum, payYearNum, pph21JournalId]);
                     await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
                 } else {
                     pph21JournalId = null;
@@ -224,13 +239,13 @@ const syncJournalForPayroll = async (conn, payrollId) => {
                         UPDATE Journal
                         SET journal_date = ?, description = ?, period_month = ?, period_year = ?
                         WHERE id = ?
-                    `, [payDate, descPph21, monthNum, yearNum, pph21JournalId]);
+                    `, [payDate, descPph21, payMonthNum, payYearNum, pph21JournalId]);
                     await conn.query('DELETE FROM JournalEntry WHERE journalId = ?', [pph21JournalId]);
                 } else {
                     const [jRes] = await conn.query(`
                         INSERT INTO Journal (journal_date, description, reference, type, period_month, period_year, createdAt)
                         VALUES (?, ?, ?, 'payroll_pph21', ?, ?, NOW())
-                    `, [payDate, descPph21, refPph21, monthNum, yearNum]);
+                    `, [payDate, descPph21, refPph21, payMonthNum, payYearNum]);
                     pph21JournalId = jRes.insertId;
                 }
             }
@@ -523,14 +538,16 @@ const createPayroll = async (req, res) => {
         const numTunjangan = Number(tunjangan || 0);
         const numBonus = Number(bonus || 0);
         const numPotongan = Number(potongan || 0);
-        const numPph21 = pph21_type === 'custom' ? Number(pph21 || 0) : 0;
+        // Hitung pph21 untuk semua tipe KECUALI 'tanpa_pajak'
+        const numPph21 = (pph21_type && pph21_type !== 'tanpa_pajak') ? Number(pph21 || 0) : 0;
         const numPph21Rate = Number(pph21_rate || 0);
 
         const bebanGaji = Math.max(0, numGajiPokok + numTunjangan + numBonus - numPotongan);
         const takeHomePay = Math.max(0, bebanGaji - numPph21);
 
-        const payDate = tanggal_dibayar || new Date().toISOString().slice(0, 10);
         const status = ['Sudah Dibayar', 'Dibayar'].includes(status_pembayaran) ? 'Dibayar' : status_pembayaran;
+        // tanggal_dibayar hanya diisi jika status sudah Dibayar, agar tidak default ke hari ini
+        const payDate = status === 'Dibayar' ? (tanggal_dibayar || new Date().toISOString().slice(0, 10)) : null;
 
         const [result] = await conn.query(`
             INSERT INTO payroll (
@@ -592,14 +609,16 @@ const updatePayroll = async (req, res) => {
         const numTunjangan = Number(tunjangan || 0);
         const numBonus = Number(bonus || 0);
         const numPotongan = Number(potongan || 0);
-        const numPph21 = pph21_type === 'custom' ? Number(pph21 || 0) : 0;
+        // Hitung pph21 untuk semua tipe KECUALI 'tanpa_pajak'
+        const numPph21 = (pph21_type && pph21_type !== 'tanpa_pajak') ? Number(pph21 || 0) : 0;
         const numPph21Rate = Number(pph21_rate || 0);
 
         const bebanGaji = Math.max(0, numGajiPokok + numTunjangan + numBonus - numPotongan);
         const takeHomePay = Math.max(0, bebanGaji - numPph21);
 
-        const payDate = tanggal_dibayar || new Date().toISOString().slice(0, 10);
         const status = ['Sudah Dibayar', 'Dibayar'].includes(status_pembayaran) ? 'Dibayar' : status_pembayaran;
+        // tanggal_dibayar hanya diisi jika status sudah Dibayar
+        const payDate = status === 'Dibayar' ? (tanggal_dibayar || new Date().toISOString().slice(0, 10)) : null;
 
         await conn.query(`
             UPDATE payroll SET

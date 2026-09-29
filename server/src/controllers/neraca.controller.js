@@ -2,7 +2,7 @@ const db = require('../utils/db');
 const { autoSyncPayrollJournals } = require('./payroll.controller');
 
 const ALL_ASSET_CATEGORIES = ['Peralatan IT', 'Kendaraan', 'Furniture', 'Bangunan', 'Mesin', 'Lainnya'];
-const ALL_LIABILITY_CATEGORIES = ['Hutang Bank', 'Hutang Usaha', 'Hutang Pajak', 'Hutang Gaji', 'Lainnya'];
+const ALL_LIABILITY_CATEGORIES = ['Hutang Bank', 'Hutang Usaha', 'Hutang Gaji', 'Lainnya'];
 
 const getNeracaByPeriod = async (month, year) => {
     // Auto-sync payroll journals kalau belum ada
@@ -135,10 +135,11 @@ const getNeracaByPeriod = async (month, year) => {
     // yang belum ditagih", bukan uang muka yang sudah diterima. Kalau
     // ditambahkan, sisa kontrak itu kehitung dobel: sekali sebagai Aset
     // (piutang), sekali lagi sebagai Kewajiban (unearned).
-    // Hitung Utang Pajak dari Cashflow (COA 2400 PPN & 2410 PPh & 2300 PPh 21)
+    // Hitung Utang Pajak lain dari Cashflow (COA 2400 PPN & 2410 PPh, TIDAK termasuk 2300 PPh 21)
+    // COA 2300 (PPh 21) ditampilkan tersendiri sebagai "Utang PPh 21" agar tidak double-count
     const [utangPajakCashflow] = await db.query(
         `SELECT COALESCE(SUM(amount), 0) as total FROM Cashflow
-         WHERE coa_code IN ('2400', '2410', '2300') AND type = 'income'
+         WHERE coa_code IN ('2400', '2410') AND type = 'income'
          AND (YEAR(date) < ? OR (YEAR(date) = ? AND MONTH(date) <= ?))`,
         [year, year, month]
     );
@@ -151,8 +152,6 @@ const getNeracaByPeriod = async (month, year) => {
          AND (j.period_year < ? OR (j.period_year = ? AND j.period_month <= ?))`,
         [year, year, month]
     );
-
-    const totalUtangPajak = Number(utangPajakCashflow[0]?.total || 0) + Number(utangPph21Journal[0]?.total || 0);
 
     // Hitung Utang Gaji (COA 2600) dari JournalEntry
     // Kredit 2600 = pengakuan utang gaji; Debit 2600 = pelunasan ke karyawan
@@ -179,36 +178,22 @@ const getNeracaByPeriod = async (month, year) => {
     const totalRecognized = (Number(recognized[0]?.total) || 0) + (Number(journalRecognized[0]?.total) || 0);
     const totalUnearned = Math.max((Number(unearned[0]?.total) || 0) - totalRecognized, 0);
 
-    const shortTermDetail = ALL_LIABILITY_CATEGORIES.map(category => {
-        let totalVal = Number(shortTerm?.find(r => r.category === category)?.total || 0);
-        if (category === 'Hutang Pajak') {
-            totalVal += totalUtangPajak;
-        }
-        return {
-            category,
-            total: totalVal
-        };
-    });
+    const shortTermDetail = ALL_LIABILITY_CATEGORIES.map(category => ({
+        category,
+        total: Number(shortTerm?.find(r => r.category === category)?.total || 0)
+    }));
 
-    // Sisipkan Utang Gaji (2600) setelah Hutang Gaji dari Liability table,
-    // atau tampilkan sebagai item tersendiri dengan label yang jelas
+    // Gabungkan Utang Gaji (2600 dari Journal) dengan entri Hutang Gaji dari tabel Liability
     const utangGajiIdx = shortTermDetail.findIndex(c => c.category === 'Hutang Gaji');
     if (utangGajiIdx >= 0) {
-        // Gabungkan dengan entri Hutang Gaji dari tabel Liability (jika ada)
         shortTermDetail[utangGajiIdx].total += totalUtangGaji;
     } else {
-        // Tampilkan sebagai baris tersendiri
-        shortTermDetail.push({ category: 'Utang Gaji', total: totalUtangGaji });
+        shortTermDetail.push({ category: 'Hutang Gaji', total: totalUtangGaji });
     }
 
-    // Tambahkan Utang PPh 21 sebagai baris tersendiri (hanya jika ada saldo)
+    // Utang PPh 21 (COA 2300) — selalu tampil sebagai baris tersendiri
     const utangPph21Saldo = Math.max(0, Number(utangPph21Journal[0]?.total || 0));
-    if (utangPph21Saldo > 0) {
-        const pph21Idx = shortTermDetail.findIndex(c => c.category === 'Utang PPh 21');
-        if (pph21Idx < 0) {
-            shortTermDetail.push({ category: 'Utang PPh 21', total: utangPph21Saldo });
-        }
-    }
+    shortTermDetail.push({ category: 'Utang PPh 21', total: utangPph21Saldo });
 
     shortTermDetail.push({ category: 'Pendapatan Diterima di Muka', total: totalUnearned });
 
